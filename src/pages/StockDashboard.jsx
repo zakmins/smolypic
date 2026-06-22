@@ -1,5 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react';
-import { AppCtx } from '../App.jsx';
+import React, { useCallback, useEffect, useState } from 'react';
 import { BarChart, LineChart, Donut } from '../charts/Charts.jsx';
 import { dzd } from '../utils.js';
 import { api } from '../api.js';
@@ -7,12 +6,14 @@ import { useT } from '../i18n.jsx';
 
 export default function StockDashboard() {
   const t = useT();
-  const { showToast } = useContext(AppCtx);
   const [d, setD] = useState(null);
+  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    api('/reports/stock').then(setD).catch((e) => showToast(`Stock dashboard failed: ${e.message}`));
-  }, [showToast]);
+  const load = useCallback(() => {
+    setError(null);
+    api('/reports/stock').then(setD).catch((e) => setError(e.message));
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   if (!d) {
     return (
@@ -23,7 +24,16 @@ export default function StockDashboard() {
             <div className="page-sub">{t('Sales, profit & shrinkage — this month.')}</div>
           </div>
         </div>
-        <div className="empty-state" style={{ paddingTop: 80 }}>{t('Crunching the numbers…')}</div>
+        {error ? (
+          <div className="empty-state" style={{ paddingTop: 80 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--red)', marginBottom: 12 }}>
+              {t('Couldn\'t load data — {msg}', { msg: error })}
+            </div>
+            <button className="btn primary" onClick={load}>{t('Retry')}</button>
+          </div>
+        ) : (
+          <div className="empty-state" style={{ paddingTop: 80 }}>{t('Crunching the numbers…')}</div>
+        )}
       </>
     );
   }

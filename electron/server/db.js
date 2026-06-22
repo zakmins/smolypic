@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS entries (
 );
 CREATE INDEX IF NOT EXISTS idx_entries_member ON entries(member_id);
 CREATE INDEX IF NOT EXISTS idx_entries_open ON entries(exit_time) WHERE exit_time IS NULL;
+CREATE INDEX IF NOT EXISTS idx_entries_time ON entries(entry_time);
 
 CREATE TABLE IF NOT EXISTS payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,9 +44,11 @@ CREATE TABLE IF NOT EXISTS payments (
   kind TEXT NOT NULL,               -- 'subscription' | 'session'
   sport TEXT,                       -- primary sport at payment time, for revenue-by-sport
   method TEXT,
-  date TEXT NOT NULL
+  date TEXT NOT NULL,
+  walk_in INTEGER NOT NULL DEFAULT 0 -- 1 ⇒ anonymous "+ Session" drop-in (never a member)
 );
 CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(date);
+CREATE INDEX IF NOT EXISTS idx_payments_member ON payments(member_id);
 
 CREATE TABLE IF NOT EXISTS judo_students (
   member_id INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
@@ -265,6 +268,17 @@ function openDb(dbPath) {
   // Per-user UI preferences (theme + language). NULL ⇒ fall back to app defaults.
   ensureColumn(db, 'users', 'theme', 'TEXT');
   ensureColumn(db, 'users', 'language', 'TEXT');
+  // payments.walk_in marks anonymous "+ Session" drop-ins, so deleting a member
+  // never reclassifies their session payments as walk-ins (deletion nulls
+  // member_id). Backfill ONCE on upgrade: before this column existed, the only
+  // member-less session rows were genuine walk-ins (no member had been deleted
+  // yet), so that exact set is the legacy walk-in history. This must not run on
+  // later opens, or it would re-tag a deleted member's orphaned payments.
+  const hasWalkIn = db.prepare('PRAGMA table_info(payments)').all().some((c) => c.name === 'walk_in');
+  if (!hasWalkIn) {
+    db.exec('ALTER TABLE payments ADD COLUMN walk_in INTEGER NOT NULL DEFAULT 0');
+    db.exec("UPDATE payments SET walk_in=1 WHERE member_id IS NULL AND kind='session'");
+  }
   return db;
 }
 

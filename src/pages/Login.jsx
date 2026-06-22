@@ -32,7 +32,7 @@ export default function Login() {
         <div className="field" style={{ marginBottom: 14 }}>
           <label>{t('Username')}</label>
           <input autoFocus value={username} onChange={(e) => setUsername(e.target.value)}
-            placeholder={t('e.g. smail')} autoComplete="username" />
+            placeholder={t('Username')} autoComplete="username" />
         </div>
         <div className="field" style={{ marginBottom: 18 }}>
           <label>{t('Password')}</label>

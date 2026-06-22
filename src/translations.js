@@ -546,7 +546,6 @@ export const FR = {
 
   // ── Login ──
   "Sign in": "Se connecter",
-  "e.g. smail": "p. ex. smail",
   "Signing in…": "Connexion…",
   "Could not sign in": "Connexion impossible",
 
@@ -673,7 +672,6 @@ export const FR = {
   "{amount} this month": "{amount} ce mois-ci",
   "Insured members": "Membres assurés",
   "{n}% of {total} covered": "{n}% sur {total} couverts",
-  "Not insured": "Non assurés",
   "members without cover": "membres sans couverture",
   "{n} already lapsed": "{n} déjà expirées",
   "Insurance revenue by month": "Revenu d'assurance par mois",

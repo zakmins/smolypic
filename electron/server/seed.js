@@ -41,6 +41,16 @@ const pad = (n) => String(n).padStart(2, '0');
 const addDays = (d, days) => new Date(d.getTime() + days * 86400000);
 const atMidnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 
+// Clean production init: a single administrator account (admin/admin) and no
+// demo data. Used for real deployments (e.g. the gym PC) — see initDb() in main.js.
+function seedAdmin(db, { username = 'admin', password = 'admin', fullName = 'Administrator' } = {}) {
+  const { hash, salt } = hashPassword(password);
+  db.prepare(
+    `INSERT INTO users (username,password_hash,password_salt,full_name,role,color,created_at,active)
+     VALUES (?,?,?,?,'admin','#10D98E',?,1)`,
+  ).run(username, hash, salt, fullName, iso(new Date()));
+}
+
 function seed(db) {
   const R = makeRng(20260611);
   const NOW = new Date();
@@ -359,6 +369,10 @@ function seed(db) {
       }
     }
 
+    // Flag the synthetic walk-ins (the only member-less session rows) so the
+    // walk-in reports match — mirrors the migration backfill in openDb.
+    run("UPDATE payments SET walk_in=1 WHERE member_id IS NULL AND kind='session'");
+
     return memberIds.length;
   });
 
@@ -366,4 +380,4 @@ function seed(db) {
   return count;
 }
 
-module.exports = { seed };
+module.exports = { seed, seedAdmin };

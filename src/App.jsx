@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 import { daysRemaining, memberStatus } from './utils.js';
 import Sidebar from './components/Sidebar.jsx';
@@ -101,10 +101,15 @@ function Dashboard() {
 
   // Callers pass an English key (+ optional {placeholder} vars); the toast is
   // shown in the active language.
+  // One shared timer: a new toast cancels the previous one's dismissal so back-to-
+  // back toasts each get their full window (and the timer is cleared on unmount).
+  const toastTimer = useRef(null);
   const showToast = useCallback((msg, vars) => {
     setToast(t(msg, vars));
-    setTimeout(() => setToast(null), 2600);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2600);
   }, [t]);
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
   const applyStock = useCallback((p) => {
     setStock(p.stock); setStockLog(p.stockLog); setConsumed(p.consumed);

@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { AppCtx } from '../App.jsx';
 import { Avatar, SportBadge, MembershipBadge, Icons } from '../components/atoms.jsx';
 import { LineChart, BarChart, Donut, Heatmap } from '../charts/Charts.jsx';
@@ -11,14 +11,17 @@ const HOURS = Array.from({ length: 15 }, (_, i) => `${String(i + 8).padStart(2, 
 
 export default function Statistics() {
   const t = useT();
-  const { members, showToast, setRoute, setFocusMemberId } = useContext(AppCtx);
+  const { members, setRoute, setFocusMemberId } = useContext(AppCtx);
   const [stats, setStats] = useState(null);
+  const [error, setError] = useState(null);
   const [kpiModal, setKpiModal] = useState(null);   // 'active' | 'inactive' | null
   const [revGran, setRevGran] = useState('months'); // revenue trend granularity: 'days' | 'weeks' | 'months'
 
-  useEffect(() => {
-    api('/stats').then(setStats).catch((e) => showToast(`Statistics failed: ${e.message}`));
-  }, [showToast]);
+  const load = useCallback(() => {
+    setError(null);
+    api('/stats').then(setStats).catch((e) => setError(e.message));
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   // Esc closes the KPI drill-down modal.
   useEffect(() => {
@@ -40,7 +43,16 @@ export default function Statistics() {
             <div className="page-sub">{t('Revenue, membership health and floor usage — year to date.')}</div>
           </div>
         </div>
-        <div className="empty-state" style={{ paddingTop: 80 }}>{t('Crunching the numbers…')}</div>
+        {error ? (
+          <div className="empty-state" style={{ paddingTop: 80 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--red)', marginBottom: 12 }}>
+              {t('Couldn\'t load data — {msg}', { msg: error })}
+            </div>
+            <button className="btn primary" onClick={load}>{t('Retry')}</button>
+          </div>
+        ) : (
+          <div className="empty-state" style={{ paddingTop: 80 }}>{t('Crunching the numbers…')}</div>
+        )}
       </>
     );
   }

@@ -87,7 +87,7 @@ export const INSURANCE_PRICE = 500;
 // The default per-session rate — the first configured session price. Matches the
 // server rule in electron/server/db.js (sessionPriceFor).
 export const defaultSessionPrice = (pricing) =>
-  (pricing && pricing.sessions[0] ? pricing.sessions[0].price : 0);
+  (pricing && pricing.sessions && pricing.sessions[0] ? pricing.sessions[0].price : 0);
 // Monthly subscription price for a membership category + weekly-plan tier.
 // Judo/Wrestling are flat monthly (the access tier is ignored).
 export const monthlySubPrice = (pricing, category, access) => {

@@ -1,5 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react';
-import { AppCtx } from '../App.jsx';
+import React, { useCallback, useEffect, useState } from 'react';
 import { BarChart, LineChart, Donut } from '../charts/Charts.jsx';
 import { dzd } from '../utils.js';
 import { api } from '../api.js';
@@ -17,12 +16,14 @@ function SectionHead({ title, sub }) {
 
 export default function MembersReports() {
   const t = useT();
-  const { showToast } = useContext(AppCtx);
   const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    api('/reports/members').then(setData).catch((e) => showToast(`Reports failed: ${e.message}`));
-  }, [showToast]);
+  const load = useCallback(() => {
+    setError(null);
+    api('/reports/members').then(setData).catch((e) => setError(e.message));
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   const year = new Date().getFullYear();
 
@@ -35,7 +36,16 @@ export default function MembersReports() {
             <div className="page-sub">{t('Session revenue & insurance — year to date.')}</div>
           </div>
         </div>
-        <div className="empty-state" style={{ paddingTop: 80 }}>{t('Crunching the numbers…')}</div>
+        {error ? (
+          <div className="empty-state" style={{ paddingTop: 80 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--red)', marginBottom: 12 }}>
+              {t('Couldn\'t load data — {msg}', { msg: error })}
+            </div>
+            <button className="btn primary" onClick={load}>{t('Retry')}</button>
+          </div>
+        ) : (
+          <div className="empty-state" style={{ paddingTop: 80 }}>{t('Crunching the numbers…')}</div>
+        )}
       </>
     );
   }

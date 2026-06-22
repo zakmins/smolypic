@@ -7,7 +7,7 @@ const { app, BrowserWindow, ipcMain, Menu, protocol, session } = require('electr
 const path = require('path');
 const fs = require('fs');
 const { openDb } = require('./server/db.js');
-const { seed } = require('./server/seed.js');
+const { seed, seedAdmin } = require('./server/seed.js');
 const { handleRequest } = require('./server/router.js');
 
 let win = null;
@@ -26,8 +26,17 @@ function initDb() {
   const fresh = !fs.existsSync(dbPath);
   db = openDb(dbPath);
   if (fresh) {
-    const n = seed(db);
-    console.log(`[smolympic] seeded a fresh database (${n} members) at ${dbPath}`);
+    // Packaged builds (the real deployment, e.g. the gym PC) start clean: just an
+    // admin/admin account, no demo data. Dev runs get the full synthetic dataset
+    // so the UI has something to show. Force demo in a packaged build with
+    // SMOLYMPIC_SEED_DEMO=1 if you ever need it.
+    if (app.isPackaged && process.env.SMOLYMPIC_SEED_DEMO !== '1') {
+      seedAdmin(db);
+      console.log(`[smolympic] initialized a clean database (admin only) at ${dbPath}`);
+    } else {
+      const n = seed(db);
+      console.log(`[smolympic] seeded a fresh demo database (${n} members) at ${dbPath}`);
+    }
   } else {
     console.log(`[smolympic] using database at ${dbPath}`);
   }

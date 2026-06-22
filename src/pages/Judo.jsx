@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { AppCtx } from '../App.jsx';
 import { Avatar, BeltStrip, ResultBadge, Icons } from '../components/atoms.jsx';
 import Select from '../components/Select.jsx';
@@ -16,6 +16,7 @@ export default function Judo() {
   const { members, showToast } = useContext(AppCtx);
   const [sel, setSel] = useState(null);
   const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
 
   // Selected-student editor + new-competition draft.
   const [form, setForm] = useState(null);       // { belt, weightCat, notes }
@@ -24,9 +25,11 @@ export default function Judo() {
   const [editSched, setEditSched] = useState(false);
   const [schedDraft, setSchedDraft] = useState([]);
 
-  useEffect(() => {
-    api('/judo').then(setData).catch((e) => showToast('Judo data failed: {message}', { message: e.message }));
-  }, [showToast]);
+  const load = useCallback(() => {
+    setError(null);
+    api('/judo').then(setData).catch((e) => setError(e.message));
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   const students = data?.students ?? [];
   const schedule = data?.schedule ?? [];
@@ -79,6 +82,22 @@ export default function Judo() {
       showToast('Schedule updated');
     } catch (e) { showToast('Save failed: {msg}', { msg: e.message }); }
   };
+
+  if (error && !data) {
+    return (
+      <>
+        <div className="page-head">
+          <div><div className="page-title">{t('Judo')}</div></div>
+        </div>
+        <div className="empty-state" style={{ paddingTop: 80 }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--red)', marginBottom: 12 }}>
+            {t('Couldn\'t load data — {msg}', { msg: error })}
+          </div>
+          <button className="btn primary" onClick={load}>{t('Retry')}</button>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>

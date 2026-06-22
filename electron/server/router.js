@@ -94,7 +94,52 @@ function todayStats(db) {
 }
 
 function allMembers(db) {
-  return db.prepare('SELECT * FROM members ORDER BY name').all().map((r) => memberRowToDict(db, r));
+  const rows = db.prepare('SELECT * FROM members ORDER BY name').all();
+  // Batch the per-member aggregates memberRowToDict would otherwise fetch one row
+  // at a time (N+1): three grouped queries instead of 3×N. allMembers runs on
+  // every swipe / guest session / stats load, so this is the hot path.
+  const payMap = new Map();
+  for (const p of db.prepare(
+    "SELECT member_id, COALESCE(SUM(CASE WHEN kind!='insurance' THEN amount ELSE 0 END),0) total, MAX(date) last "
+    + 'FROM payments WHERE member_id IS NOT NULL GROUP BY member_id',
+  ).all()) payMap.set(p.member_id, p);
+  const visitMap = new Map();
+  for (const e of db.prepare('SELECT member_id, MAX(entry_time) t FROM entries GROUP BY member_id').all()) {
+    visitMap.set(e.member_id, e.t);
+  }
+  const photoMap = new Map();
+  for (const ph of db.prepare('SELECT member_id, updated_at FROM member_photos').all()) {
+    photoMap.set(ph.member_id, ph.updated_at);
+  }
+  // Mirrors memberRowToDict (db.js) but reads the batched maps. Keep the two in sync.
+  return rows.map((r) => {
+    const pay = payMap.get(r.id) || { total: 0, last: null };
+    const photoUpdated = photoMap.get(r.id) || null;
+    return {
+      id: r.id,
+      rfidUid: r.rfid_uid,
+      name: r.name,
+      gender: r.gender,
+      dob: r.dob,
+      phone: r.phone,
+      sports: JSON.parse(r.sports),
+      membershipType: r.membership_type,
+      subStart: r.sub_start,
+      subEnd: r.sub_end,
+      durationDays: r.duration_days,
+      sessionsTotal: r.sessions_total,
+      sessionsLeft: r.sessions_left,
+      amountPaid: pay.total,
+      paymentDate: pay.last || r.join_date,
+      insurance: !!r.insurance,
+      insuranceExpiry: r.insurance_expiry,
+      hasPhoto: !!photoUpdated,
+      photoTag: photoUpdated ? ms(photoUpdated) : null,
+      hue: r.hue,
+      lastVisit: visitMap.get(r.id) || r.join_date,
+      joinDate: r.join_date,
+    };
+  });
 }
 
 function stockPayload(db) {
@@ -313,7 +358,8 @@ function guestSession(db, { body, user }) {
   const name = (body.name || '').trim() || 'Walk-in';
   const amount = Math.max(0, Math.round(Number(body.amount) || 0));
   // Bill it as a session (counts in today's session revenue + count, by-sport stats).
-  db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (NULL,?,?,?,?,?)')
+  // walk_in=1 marks it as an anonymous drop-in for the walk-in reports.
+  db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,walk_in) VALUES (NULL,?,?,?,?,?,1)')
     .run(amount, 'session', 'GYM', 'Cash', iso(now));
   const expires = new Date(now.getTime() + 2 * 3600 * 1000);   // on the floor for 2 hours
   db.prepare('INSERT INTO guest_sessions (name,amount,entry_time,expires_at) VALUES (?,?,?,?)')
@@ -345,8 +391,17 @@ function createMember(db, { body, user }) {
   const now = new Date();
   const subStart = body.subStart || iso(now);
   const subEnd = body.subEnd || iso(new Date(ms(subStart) + (body.durationDays ?? 30) * 86400000));
-  const nextId = (db.prepare('SELECT COALESCE(MAX(id),0) m FROM members').get().m) + 1;
-  const rfid = body.rfidUid || String(4200000000 + nextId * 13);   // numeric tag UID
+  // Numeric tag UID. AUTOINCREMENT means MAX(id)+1 can reuse an id after the
+  // highest member was deleted, which would derive a UID that already exists and
+  // hit the UNIQUE constraint. Start from the sequence high-water mark and step
+  // until the derived UID is free.
+  let rfid = body.rfidUid;
+  if (!rfid) {
+    const seq = db.prepare("SELECT seq FROM sqlite_sequence WHERE name='members'").get();
+    let n = (seq ? seq.seq : 0) + 1;
+    do { rfid = String(4200000000 + n * 13); n += 1; }
+    while (db.prepare('SELECT 1 FROM members WHERE rfid_uid=?').get(rfid));
+  }
   const isSession = body.membershipType === 'session';
   const sports = body.sports || ['GYM'];
   // sessions_total/left carry the quota: NULL ⇒ unlimited sub (or membership without
@@ -552,6 +607,10 @@ function stats(db) {
     return 'GYM';
   };
   const catTotals = Object.fromEntries(CAT_ORDER.map((k) => [k, 0]));
+  // Deleted members leave orphaned payments (m.sports NULL). Fall back to the
+  // sport recorded on the payment so their subscription revenue keeps its
+  // category (judo/wrestling/cardio) instead of all collapsing into Gym.
+  const sportCat = (sp) => (sp === 'JUDO' ? 'JUDO' : sp === 'WRESTLING' ? 'WRESTLING' : sp === 'CARDIO' ? 'CARDIO' : 'GYM');
   db.prepare(
     'SELECT p.kind kind, p.sport sport, m.sports msports, SUM(p.amount) s '
     + 'FROM payments p LEFT JOIN members m ON m.id = p.member_id '
@@ -559,7 +618,7 @@ function stats(db) {
   ).all(yearStart).forEach((r) => {
     const cat = r.kind === 'session'
       ? 'GYM_SESSIONS'
-      : (r.msports ? catOf(r.msports) : (r.sport === 'CARDIO' ? 'CARDIO' : 'GYM'));
+      : (r.msports ? catOf(r.msports) : sportCat(r.sport));
     catTotals[cat] += r.s;
   });
   const revenueBySport = CAT_ORDER
@@ -678,9 +737,10 @@ function memberReports(db) {
   const nowIso = iso(now);
 
   // ── Walk-in session reports — the "+ Session" button only ─────────────────────
-  // These are one-off, non-member drop-ins: a payment with no member attached
-  // (member_id IS NULL, kind='session'). Pay-per-session *members* are excluded.
-  const SESS = "kind='session' AND member_id IS NULL";
+  // These are one-off, non-member drop-ins flagged at the till (walk_in=1). Using
+  // the flag — not member_id IS NULL — means a deleted member's orphaned session
+  // payments are never miscounted here as walk-ins.
+  const SESS = "kind='session' AND walk_in=1";
   const sAgg = (clause, ...args) => db.prepare(
     `SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM payments WHERE ${SESS}${clause}`,
   ).get(...args);

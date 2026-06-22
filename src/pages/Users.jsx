@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Icons } from '../components/atoms.jsx';
 import DatePicker from '../components/DatePicker.jsx';
@@ -36,7 +36,13 @@ export default function Users() {
   const [editing, setEditing] = useState(null);     // user object or 'new'
   const [confirmDelete, setConfirmDelete] = useState(null);
 
-  const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2400); };
+  const toastTimer = useRef(null);
+  const flash = (msg) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2400);
+  };
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
   const load = async () => {
     setLoading(true); setError(null);
