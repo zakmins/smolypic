@@ -1,0 +1,55 @@
+{
+  "name": "smolympic",
+  "productName": "SMOLYMPIC",
+  "version": "0.1.0",
+  "description": "Desktop gym management — live presence, members, judo, wrestling, stats, stock.",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "electron:start": "npm run build && electron .",
+    "dist": "npm run build && electron-builder",
+    "rebuild:sqlite": "cd node_modules/better-sqlite3 && npx --yes prebuild-install -r electron -t 31.7.7 || npx --yes prebuild-install -r electron -t 31.7.6",
+    "postinstall": "npm run rebuild:sqlite"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^3.8.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^31.7.6",
+    "electron-builder": "^24.13.3",
+    "vite": "^5.4.11",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "dz.smolympic.app",
+    "files": [
+      "dist/**",
+      "electron/**"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.png"
+    }
+  }
+}
