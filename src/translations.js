@@ -601,6 +601,11 @@ export const FR = {
   "Choose a date": "Choisir une date",
   "Previous month": "Mois précédent",
   "Next month": "Mois suivant",
+  "Previous year": "Année précédente",
+  "Next year": "Année suivante",
+  "Previous years": "Années précédentes",
+  "Next years": "Années suivantes",
+  "Choose month and year": "Choisir le mois et l'année",
   "Today": "Aujourd'hui",
   "Clear date": "Effacer la date",
 

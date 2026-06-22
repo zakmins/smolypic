@@ -540,7 +540,18 @@ input::placeholder { color: var(--faint); }
 }
 @keyframes dp-in { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
 .dp-head { display: flex; align-items: center; gap: 6px; margin-bottom: 11px; }
-.dp-title { flex: 1; text-align: center; font-family: var(--display); font-weight: 900; font-style: italic; font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em; }
+.dp-title { flex: 1; text-align: center; font-family: var(--display); font-weight: 900; font-style: italic; font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text); padding: 4px 6px; border-radius: var(--r-sm); transition: background 0.12s, color 0.12s; }
+.dp-title:hover { background: var(--raised); color: var(--accent); }
+.dp-mgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.dp-cell {
+  height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line-strong);
+  color: var(--text); font-family: var(--mono); font-size: 13px; font-weight: 600;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.dp-cell:hover { border-color: var(--accent); color: var(--accent); }
+.dp-cell.today { box-shadow: inset 0 0 0 1px var(--accent); }
+.dp-cell.sel { background: var(--grad); color: var(--on-accent); border-color: transparent; box-shadow: none; }
 .dp-nav {
   width: 30px; height: 30px; flex: none; display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--panel-2);

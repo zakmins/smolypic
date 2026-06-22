@@ -23,12 +23,14 @@ export default function DatePicker({ value, onChange, placeholder = 'Any date', 
   const t = useT();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(() => firstOfMonth(parseDay(value) || new Date()));
+  const [mode, setMode] = useState('days');   // 'days' | 'months' | 'years'
   const triggerRef = useRef(null);
   const popRef = useRef(null);
   const [pos, setPos] = useState(null);
 
   const openPicker = () => {
     setView(firstOfMonth(parseDay(value) || new Date()));   // jump to the selected month
+    setMode('days');
     setOpen(true);
   };
 
@@ -78,25 +80,75 @@ export default function DatePicker({ value, onChange, placeholder = 'Any date', 
   }, [view]);
 
   const pick = (d) => { onChange(dayKey(d)); setOpen(false); };
-  const shift = (n) => setView((v) => new Date(v.getFullYear(), v.getMonth() + n, 1));
+  // Header ‹ › steps by month (days view), year (months view) or decade (years view).
+  const shift = (n) => setView((v) => {
+    if (mode === 'days') return new Date(v.getFullYear(), v.getMonth() + n, 1);
+    if (mode === 'months') return new Date(v.getFullYear() + n, v.getMonth(), 1);
+    return new Date(v.getFullYear() + n * 12, v.getMonth(), 1);   // years view: jump a decade
+  });
+
+  const selDay = parseDay(value);
+  const decadeStart = Math.floor(view.getFullYear() / 12) * 12;   // 12-year page of years
+  const years = Array.from({ length: 12 }, (_, i) => decadeStart + i);
+
+  // Title text + what tapping it drills up into (days → months → years).
+  const headLabel = mode === 'days' ? `${t(MONTHS[view.getMonth()])} ${view.getFullYear()}`
+    : mode === 'months' ? `${view.getFullYear()}`
+    : `${decadeStart}–${decadeStart + 11}`;
+  const onTitle = () => setMode(mode === 'days' ? 'months' : mode === 'months' ? 'years' : 'years');
 
   const pop = open && pos && createPortal(
     <div ref={popRef} className="dp-pop" style={{ top: pos.top, left: pos.left }} role="dialog" aria-label={t('Choose a date')}>
       <div className="dp-head">
-        <button type="button" className="dp-nav" onClick={() => shift(-1)} aria-label={t('Previous month')}>‹</button>
-        <div className="dp-title">{t(MONTHS[view.getMonth()])} {view.getFullYear()}</div>
-        <button type="button" className="dp-nav" onClick={() => shift(1)} aria-label={t('Next month')}>›</button>
+        <button type="button" className="dp-nav" onClick={() => shift(-1)}
+          aria-label={t(mode === 'days' ? 'Previous month' : mode === 'months' ? 'Previous year' : 'Previous years')}>‹</button>
+        <button type="button" className="dp-title" onClick={onTitle}
+          aria-label={t('Choose month and year')}>{headLabel}</button>
+        <button type="button" className="dp-nav" onClick={() => shift(1)}
+          aria-label={t(mode === 'days' ? 'Next month' : mode === 'months' ? 'Next year' : 'Next years')}>›</button>
       </div>
-      <div className="dp-grid">
-        {DOW.map((d) => <div key={d} className="dp-dow">{t(d)}</div>)}
-        {cells.map((c) => (
-          <button type="button" key={c.key}
-            className={`dp-day${c.inMonth ? '' : ' out'}${c.key === todayKey ? ' today' : ''}${c.key === value ? ' sel' : ''}`}
-            onClick={() => pick(c.date)} aria-current={c.key === value ? 'date' : undefined}>
-            {c.date.getDate()}
-          </button>
-        ))}
-      </div>
+      {mode === 'days' && (
+        <div className="dp-grid">
+          {DOW.map((d) => <div key={d} className="dp-dow">{t(d)}</div>)}
+          {cells.map((c) => (
+            <button type="button" key={c.key}
+              className={`dp-day${c.inMonth ? '' : ' out'}${c.key === todayKey ? ' today' : ''}${c.key === value ? ' sel' : ''}`}
+              onClick={() => pick(c.date)} aria-current={c.key === value ? 'date' : undefined}>
+              {c.date.getDate()}
+            </button>
+          ))}
+        </div>
+      )}
+      {mode === 'months' && (
+        <div className="dp-mgrid">
+          {MONTHS.map((m, i) => {
+            const isSel = selDay && selDay.getFullYear() === view.getFullYear() && selDay.getMonth() === i;
+            const isNow = new Date().getFullYear() === view.getFullYear() && new Date().getMonth() === i;
+            return (
+              <button type="button" key={m}
+                className={`dp-cell${isNow ? ' today' : ''}${isSel ? ' sel' : ''}`}
+                onClick={() => { setView(new Date(view.getFullYear(), i, 1)); setMode('days'); }}>
+                {t(MONTHS[i]).slice(0, 3)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {mode === 'years' && (
+        <div className="dp-mgrid">
+          {years.map((y) => {
+            const isSel = selDay && selDay.getFullYear() === y;
+            const isNow = new Date().getFullYear() === y;
+            return (
+              <button type="button" key={y}
+                className={`dp-cell${isNow ? ' today' : ''}${isSel ? ' sel' : ''}`}
+                onClick={() => { setView(new Date(y, view.getMonth(), 1)); setMode('months'); }}>
+                {y}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="dp-foot">
         <button type="button" className="btn sm ghost" onClick={() => pick(new Date())}>{t('Today')}</button>
         {value && <button type="button" className="btn sm ghost" onClick={() => { onChange(''); setOpen(false); }}>{t('Clear')}</button>}

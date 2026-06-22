@@ -49,9 +49,11 @@ export default function TopBar() {
         <div className="k">{today.subscriptionCount === 1 ? t('{n} subscription today', { n: today.subscriptionCount }) : t('{n} subscriptions today', { n: today.subscriptionCount })}</div>
       </div>
       <div className="top-actions">
-        <button className="btn sm ghost" onClick={simulateSwipe} title={t('Test only: emulates a real RFID reader scanning a tag (or press S anywhere)')} aria-label={t('Simulate RFID scan (test)')}>
-          <Icons.swipe width="15" height="15" /> {t('Test scan')}
-        </button>
+        {import.meta.env.DEV && (
+          <button className="btn sm ghost" onClick={simulateSwipe} title={t('Test only: emulates a real RFID reader scanning a tag (or press S anywhere)')} aria-label={t('Simulate RFID scan (test)')}>
+            <Icons.swipe width="15" height="15" /> {t('Test scan')}
+          </button>
+        )}
         <button className="btn primary" onClick={() => setFreeSession(true)} title={t('Add a walk-in paid session to the floor')}>
           <Icons.plus width="16" height="16" /> {t('Session')}
         </button>

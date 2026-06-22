@@ -244,7 +244,9 @@ function Dashboard() {
 
   // 'S' fires a simulated swipe even while a popup is open — exactly how a
   // hardware reader would keep emitting events. (Ignored while typing.)
+  // Dev-only: disabled in production so it can't trigger accidental fake scans.
   useEffect(() => {
+    if (!import.meta.env.DEV) return undefined;
     const onKey = (e) => {
       if (e.key.toLowerCase() !== 's' || e.ctrlKey || e.metaKey || e.altKey) return;
       const t = e.target;
