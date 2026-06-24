@@ -246,6 +246,14 @@ function iso(d) {
     + `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+// Date-only stamp (YYYY-MM-DD) for fields that represent a calendar day rather
+// than an instant — e.g. the subscription window (sub_start/sub_end). Accepts a
+// Date or any iso()/date string. ms() parses these back as local midnight.
+function isoDate(d) {
+  if (typeof d === 'string') return d.slice(0, 10);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function ms(s) {
   // Parse "YYYY-MM-DDTHH:MM:SS" as local time → epoch milliseconds.
   const [date, time = '00:00:00'] = s.slice(0, ISO_LEN).split('T');
@@ -372,7 +380,7 @@ function logActivity(db, userId, action, target, detail) {
 }
 
 module.exports = {
-  SCHEMA, openDb, iso, ms,
+  SCHEMA, openDb, iso, isoDate, ms,
   hashPassword, verifyPassword, userRowToDict, memberRowToDict, setMemberPhoto, logActivity,
   DEFAULT_PRICING, getPricing, savePricing, sessionPriceFor,
 };

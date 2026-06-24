@@ -1,7 +1,7 @@
 // Synthetic seed for Smolympic — Node port of the former backend/seed.py.
 // Deterministic (seeded PRNG) and dense enough that every statistics query
 // computes believable numbers from real rows. Seeds Smail (admin) + 2 coaches.
-const { iso, hashPassword } = require('./db.js');
+const { iso, isoDate, hashPassword } = require('./db.js');
 
 // ── Seeded PRNG (mulberry32) + Python-random-style helpers ────────────────────
 function makeRng(seed) {
@@ -130,7 +130,7 @@ function seed(db) {
       let subStart, subEnd, sessionsTotal = null, sessionsLeft = null;
       if (mtype === 'subscription') {
         if (expiringIdx.has(i)) {
-          subEnd = new Date(NOW.getTime() + R.randint(3, 20) * 3600000);  // within a day ⇒ days_remaining 1 (< 2)
+          subEnd = addDays(NOW, 1);                       // lapses tomorrow ⇒ days_remaining 1 (< 2)
           subStart = addDays(subEnd, -dur);
         } else if (expiredIdx.has(i)) {
           subEnd = addDays(NOW, -R.randint(1, 18));
@@ -158,7 +158,7 @@ function seed(db) {
         `${NOW.getFullYear() - R.randint(16, 47)}-${pad(R.randint(1, 12))}-${pad(R.randint(1, 28))}`,
         `05${R.randint(40, 99)} ${R.randint(10, 99)} ${R.randint(10, 99)} ${R.randint(10, 99)}`,
         JSON.stringify(sports), mtype,
-        iso(subStart), iso(subEnd), dur, sessionsTotal, sessionsLeft,
+        isoDate(subStart), isoDate(subEnd), dur, sessionsTotal, sessionsLeft,
         insured ? 1 : 0, insExpiry, R.randint(0, 359), iso(join),
       );
       memberIds.push(info.lastInsertRowid);

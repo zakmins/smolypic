@@ -4,7 +4,7 @@
 // Electron main process (over IPC) and in plain Node (tests).
 const crypto = require('crypto');
 const {
-  iso, ms, hashPassword, verifyPassword, userRowToDict, memberRowToDict, setMemberPhoto, logActivity,
+  iso, isoDate, ms, hashPassword, verifyPassword, userRowToDict, memberRowToDict, setMemberPhoto, logActivity,
   getPricing, savePricing, sessionPriceFor,
 } = require('./db.js');
 
@@ -31,7 +31,10 @@ const isoWeek = (d) => {
 };
 
 // ── membership rule (shared by live cards + stats; mirrors src/utils.js) ───────
-// Whole days until the subscription window closes (ceil ⇒ "1 day left" until midnight).
+// Whole days left in the window. sub_end is the renewal day (exclusive): the last
+// active day is the day before it, so a sub paid on the 25th for 30 days runs the
+// 25th through the 24th next month — exactly 30 days. ceil ⇒ "1 day left" through
+// the final active day, then ≤ 0 once sub_end arrives.
 const subDaysLeft = (m) => Math.ceil((ms(m.subEnd) - Date.now()) / 86400000);
 
 // Negative quota ⇒ the club is carrying the member. Unlimited subs (NULL quota) never qualify.
@@ -389,8 +392,9 @@ function removeGuestSession(db, { params, user }) {
 
 function createMember(db, { body, user }) {
   const now = new Date();
-  const subStart = body.subStart || iso(now);
-  const subEnd = body.subEnd || iso(new Date(ms(subStart) + (body.durationDays ?? 30) * 86400000));
+  // sub_start/sub_end are calendar days, stored date-only (YYYY-MM-DD).
+  const subStart = isoDate(body.subStart || now);
+  const subEnd = isoDate(body.subEnd || new Date(ms(subStart) + (body.durationDays ?? 30) * 86400000));
   // Numeric tag UID. AUTOINCREMENT means MAX(id)+1 can reuse an id after the
   // highest member was deleted, which would derive a UID that already exists and
   // hit the UNIQUE constraint. Start from the sequence high-water mark and step
@@ -471,7 +475,7 @@ function updateMember(db, { params, body, user }) {
      WHERE id=?`,
   ).run(
     body.name, body.gender, body.dob ?? null, body.phone ?? null, JSON.stringify(body.sports),
-    body.membershipType, body.subStart ?? null, body.subEnd ?? null, body.durationDays,
+    body.membershipType, body.subStart ? isoDate(body.subStart) : null, body.subEnd ? isoDate(body.subEnd) : null, body.durationDays,
     sessionsTotal, sessionsLeft, nowInsured ? 1 : 0, insExpiry,
     body.rfidUid ?? null, id,
   );
@@ -521,7 +525,7 @@ function renewMember(db, { params, body, user }) {
   if (body.days) {
     const base = Math.max(now.getTime(), ms(m.sub_end));
     db.prepare('UPDATE members SET sub_end=?, duration_days=? WHERE id=?')
-      .run(iso(new Date(base + body.days * 86400000)), body.days, id);
+      .run(isoDate(new Date(base + body.days * 86400000)), body.days, id);
     parts.push(`+${body.days} days`);
   }
   if (body.applyPlan) {

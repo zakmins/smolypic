@@ -13,8 +13,14 @@ export const BELT_COLOR = ['#E8E6E0','#F5C518','#FF8C2E','#37B36B','#3D8BFF','#8
 export const WEIGHT_CATS = ['Flyweight','Bantamweight','Featherweight','Lightweight','Welterweight','Middleweight','Heavyweight','Super Heavyweight'];
 export const STOCK_CATEGORIES = ['Equipment','Supplements','Consumables','Merchandise','Maintenance'];
 
-export const daysRemaining = (m) =>
-  Math.ceil((new Date(m.subEnd) - Date.now()) / 86400000);
+// sub_end is the renewal day (exclusive) and is stored date-only (YYYY-MM-DD): a
+// 30-day sub paid on the 25th runs through the 24th next month and lapses on the
+// 25th — exactly 30 days. Parse as local time (a bare date string reads as UTC
+// otherwise). Mirrors subDaysLeft in electron/server/router.js.
+export const daysRemaining = (m) => {
+  const end = new Date(`${String(m.subEnd).slice(0, 10)}T00:00:00`).getTime();
+  return Math.ceil((end - Date.now()) / 86400000);
+};
 
 // A subscription is either UNLIMITED (date-window only) or METERED (date + a
 // session quota). The quota is encoded in sessionsTotal/sessionsLeft:
