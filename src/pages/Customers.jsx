@@ -15,6 +15,7 @@ const SORTS = {
   start: { label: 'Start date', fn: (a, b) => new Date(b.subStart) - new Date(a.subStart) },
   end: { label: 'End date', fn: (a, b) => new Date(a.subEnd) - new Date(b.subEnd) },
   paid: { label: 'Amount paid', fn: (a, b) => b.amountPaid - a.amountPaid },
+  balance: { label: 'Balance due', fn: (a, b) => (b.balance || 0) - (a.balance || 0) },
 };
 
 // Entry-history pager shows 5 visits per page (pageList lives in utils).
@@ -22,7 +23,7 @@ const ENTRY_PAGE_SIZE = 5;
 
 export default function Customers() {
   const t = useT();
-  const { members, presence, saveMember, renewMember, payInsurance, deleteMember, focusMemberId, setFocusMemberId } = useContext(AppCtx);
+  const { members, presence, saveMember, renewMember, payInsurance, payBalance, deleteMember, focusMemberId, setFocusMemberId } = useContext(AppCtx);
   const [q, setQ] = useState('');
   const [gender, setGender] = useState('all');
   const [sport, setSport] = useState('all');
@@ -32,6 +33,7 @@ export default function Customers() {
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(null);   // member object or 'new'
   const [renewing, setRenewing] = useState(null);
+  const [collecting, setCollecting] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   // Opened from another page (e.g. the live floor modal): focus that member's drawer.
@@ -54,6 +56,7 @@ export default function Customers() {
         if (status === 'active') return s === 'active';
         if (status === 'expired') return s === 'expired';
         if (status === 'session') return m.membershipType === 'session';
+        if (status === 'owing') return m.balance > 0;
         return true;
       })
       .filter((m) => insurance === 'all' || (insurance === 'yes') === m.insurance)
@@ -81,7 +84,7 @@ export default function Customers() {
         <Select value={sport} onChange={setSport} ariaLabel={t('Filter by sport')}
           options={[['all', t('All sports')], ...SPORTS.map((s) => [s, t(s[0] + s.slice(1).toLowerCase())])]} />
         <Select value={status} onChange={setStatus} ariaLabel={t('Filter by status')}
-          options={[['all', t('Any status')], ['active', t('Active')], ['expired', t('Expired')], ['session', t('Session-only')]]} />
+          options={[['all', t('Any status')], ['active', t('Active')], ['expired', t('Expired')], ['session', t('Session-only')], ['owing', t('Owing balance')]]} />
         <Select value={insurance} onChange={setInsurance} ariaLabel={t('Filter by insurance')}
           options={[['all', t('Insurance: any')], ['yes', t('Insured')], ['no', t('Not insured')]]} />
         <Select value={sort} onChange={setSort} ariaLabel={t('Sort')}
@@ -113,7 +116,12 @@ export default function Customers() {
                     <td className="mono">{isSession ? '—' : fmtDate(m.subEnd)}</td>
                     <td>{m.gender === 'M' ? t('Male') : t('Female')}</td>
                     <td>{m.insurance ? <span className="badge green">✓</span> : <span className="badge neutral">✗</span>}</td>
-                    <td className="mono num">{dzd(m.amountPaid)}</td>
+                    <td className="mono num">
+                      {dzd(m.amountPaid)}
+                      {m.balance > 0 && (
+                        <div style={{ fontSize: 11, color: 'var(--red)', fontWeight: 700 }}>{t('owes {amount}', { amount: dzd(m.balance) })}</div>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -130,6 +138,7 @@ export default function Customers() {
           onClose={() => setSelected(null)}
           onEdit={() => setEditing(sel)}
           onRenew={() => setRenewing(sel)}
+          onCollect={() => setCollecting(sel)}
           onPayInsurance={payInsurance}
           onDelete={() => setConfirmDelete(sel)} />
       )}
@@ -141,6 +150,10 @@ export default function Customers() {
       {renewing && (
         <RenewForm member={renewing} onClose={() => setRenewing(null)}
           onSave={(payload) => { renewMember(renewing.id, payload); setRenewing(null); }} />
+      )}
+      {collecting && (
+        <CollectBalanceForm member={collecting} onClose={() => setCollecting(null)}
+          onSave={(amount) => { payBalance(collecting.id, amount); setCollecting(null); }} />
       )}
       {confirmDelete && (
         <div className="modal-center" onClick={() => setConfirmDelete(null)}>
@@ -160,7 +173,7 @@ export default function Customers() {
   );
 }
 
-function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onPayInsurance, onDelete }) {
+function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect, onPayInsurance, onDelete }) {
   const t = useT();
   const { pricing } = useContext(AppCtx);
   const insurancePrice = pricing?.insurance ?? INSURANCE_PRICE;
@@ -232,6 +245,7 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onPayInsu
             {!isSession && <><span className="k">{t('Subscription')}</span><span className="v">{fmtDate(m.subStart)} → {fmtDate(m.subEnd)}</span></>}
             {isSubscription(m) && <><span className="k">{t('Access')}</span><span className="v">{isUnlimitedSub(m) ? t('Unlimited') : t('Metered — {left} / {total} sessions', { left: m.sessionsLeft, total: m.sessionsTotal })}</span></>}
             <span className="k">{t('Amount paid')}</span><span className="v mono">{dzd(m.amountPaid)}</span>
+            {m.balance > 0 && <><span className="k">{t('Balance due')}</span><span className="v mono" style={{ color: 'var(--red)', fontWeight: 700 }}>{dzd(m.balance)}</span></>}
             <span className="k">{t('Last payment')}</span><span className="v">{fmtDate(m.paymentDate)}</span>
             <span className="k">{t('Last visit')}</span><span className="v">{fmtDate(m.lastVisit)}</span>
           </div>
@@ -259,6 +273,20 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onPayInsu
               </button>
             )}
           </div>
+
+          {/* Outstanding balance — shown only when the member owes money */}
+          {m.balance > 0 && (
+            <div className="ins-card" style={{ marginTop: 12 }}>
+              <Icons.warn width="20" height="20" style={{ color: 'var(--red)', flexShrink: 0 }} />
+              <div style={{ minWidth: 0 }}>
+                <div className="ins-title">{t('Balance due')}</div>
+                <div className="ins-sub">{t('{amount} still owed on this membership', { amount: dzd(m.balance) })}</div>
+              </div>
+              <button className="btn sm primary" style={{ marginLeft: 'auto' }} onClick={() => onCollect(m)}>
+                {t('Collect payment')}
+              </button>
+            </div>
+          )}
 
           <div className="panel-title" style={{ margin: '22px 0 10px' }}>{t('Entry history')}</div>
           {visits == null ? (
@@ -438,6 +466,9 @@ function MemberForm({ member, onClose, onSave }) {
   });
   const { pricing } = useContext(AppCtx);
   const insurancePrice = pricing?.insurance ?? INSURANCE_PRICE;
+  // Partial payments (new members only): null ⇒ pay the full total; a number ⇒ a
+  // deposit, leaving the rest as the member's balance. Editing never bills.
+  const [paidNow, setPaidNow] = useState(null);
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   // For a new member, keep the monthly price in step with the configured price
   // for the chosen category + plan (still editable as a manual override).
@@ -449,6 +480,10 @@ function MemberForm({ member, onClose, onSave }) {
   const months = Math.max(1, Number(f.months) || 1);
   const monthly = Math.max(0, Number(f.monthlyPrice) || 0);
   const total = months * monthly;
+  // Default the deposit to the full total; it tracks the total until manually set.
+  const paid = paidNow == null ? total : Math.min(total, Math.max(0, Number(paidNow) || 0));
+  const balance = Math.max(0, total - paid);
+  useEffect(() => { if (!member) setPaidNow((p) => (p == null ? null : Math.min(p, total))); }, [member, total]);
 
   const submit = () => {
     if (!f.name.trim()) return;
@@ -472,7 +507,8 @@ function MemberForm({ member, onClose, onSave }) {
       durationDays,
       subStart: start, subEnd: member ? member.subEnd : end,
       sessionsTotal, sessionsLeft,
-      amountPaid: member ? undefined : total,
+      amountPaid: member ? undefined : paid,
+      total: member ? undefined : total,
       insurance: f.insurance,
       ...(f.photo !== undefined ? { photo: f.photo } : {}),   // omit ⇒ leave photo unchanged
     });
@@ -528,6 +564,17 @@ function MemberForm({ member, onClose, onSave }) {
             <div className="field"><label>{t('Total')}</label>
               <input disabled value={t('{total} DZD  ({months} mo × {monthly})', { total, months, monthly })} /></div>
 
+            {!member && (
+              <>
+                <div className="field"><label>{t('Amount paid now (DZD)')}</label>
+                  <input type="number" min="0" max={total} value={paid}
+                    onChange={(e) => setPaidNow(Number(e.target.value))} /></div>
+                <div className="field"><label>{t('Balance due')}</label>
+                  <input disabled value={dzd(balance)}
+                    style={balance > 0 ? { color: 'var(--red)', fontWeight: 700 } : undefined} /></div>
+              </>
+            )}
+
             <div className="field"><label>{t('Insurance')}</label>
               <div className="check-row" style={{ marginTop: 9 }}>
                 <input id="ins" type="checkbox" checked={f.insurance} onChange={(e) => set('insurance', e.target.checked)} />
@@ -552,31 +599,51 @@ function RenewForm({ member: m, onClose, onSave }) {
   const isSession = m.membershipType === 'session';
   const category = categoryOf(m.sports);
   const weekly = hasWeeklyPlan(category);   // Gym/Cardio ⇒ choose a weekly plan
-  const [duration, setDuration] = useState(30);
+  const [months, setMonths] = useState(1);
   const [access, setAccess] = useState(() => accessOf(m));
   const [sessions, setSessions] = useState(10);
   const [amount, setAmount] = useState(2500);
+  // Partial payment: null ⇒ pay the full fee; a number ⇒ a deposit, the rest is
+  // added to the member's balance. Tracks the total until manually changed.
+  const [paidNow, setPaidNow] = useState(null);
   const sessionPrice = defaultSessionPrice(pricing);
   // Suggest the configured price for the chosen plan + period (still editable).
   useEffect(() => {
     if (isSession || !pricing) return;
-    const months = Math.max(1, Math.round(duration / 30));
-    setAmount(monthlySubPrice(pricing, category, access) * months);
-  }, [isSession, pricing, category, access, duration]);
+    setAmount(monthlySubPrice(pricing, category, access) * Math.max(1, months));
+  }, [isSession, pricing, category, access, months]);
+
+  // The full fee for this renewal, the deposit collected now, and the shortfall.
+  const total = isSession ? sessions * sessionPrice : amount;
+  const paid = paidNow == null ? total : Math.min(total, Math.max(0, Number(paidNow) || 0));
+  const balance = Math.max(0, total - paid);
+  useEffect(() => { setPaidNow((p) => (p == null ? null : Math.min(p, total))); }, [total]);
 
   const submit = () => {
     if (isSession) {
       // Pay-per-session: buy a pack of sessions, no date.
-      onSave({ sessions, amount: sessions * sessionPrice, method: 'Cash' });
+      onSave({ sessions, amount: paid, total, method: 'Cash' });
     } else {
       // Extend the date and apply the chosen plan for the renewed period.
       // Gym/Cardio ⇒ weekly quota (perMonth × months); Judo/Wrestling ⇒ unlimited.
-      const months = Math.max(1, Math.round(duration / 30));
+      const mo = Math.max(1, months);
       const perMonth = weekly && access !== 'unlimited' ? ACCESS.find((a) => a.key === access).perMonth : null;
-      const sessionsTotal = perMonth != null ? perMonth * months : null;
-      onSave({ days: duration, applyPlan: true, sessionsTotal, amount, method: 'Cash' });
+      const sessionsTotal = perMonth != null ? perMonth * mo : null;
+      onSave({ days: mo * 30, applyPlan: true, sessionsTotal, amount: paid, total, method: 'Cash' });
     }
   };
+
+  // Shared deposit + balance fields (both pay-per-session packs and subscriptions).
+  const payFields = (
+    <>
+      <div className="field"><label>{t('Amount paid now (DZD)')}</label>
+        <input type="number" min="0" max={total} value={paid}
+          onChange={(e) => setPaidNow(Number(e.target.value))} /></div>
+      <div className="field"><label>{t('Balance due')}</label>
+        <input disabled value={dzd(balance)}
+          style={balance > 0 ? { color: 'var(--red)', fontWeight: 700 } : undefined} /></div>
+    </>
+  );
 
   return (
     <div className="modal-center" onClick={onClose}>
@@ -592,12 +659,12 @@ function RenewForm({ member: m, onClose, onSave }) {
                 <input type="number" min="1" value={sessions} onChange={(e) => setSessions(Number(e.target.value))} /></div>
               <div className="field"><label>{t('Total')}</label>
                 <input disabled value={`${sessions * sessionPrice} DZD`} /></div>
+              {payFields}
             </div>
           ) : (
             <div className="form-grid">
-              <div className="field"><label>{t('Extend by')}</label>
-                <Select value={duration} onChange={(v) => setDuration(Number(v))} ariaLabel={t('Extend by')}
-                  options={[[30, t('1 month')], [90, t('3 months')], [180, t('6 months')], [365, t('1 year')]]} /></div>
+              <div className="field"><label>{t('Months')}</label>
+                <input type="number" min="1" value={months} onChange={(e) => setMonths(Number(e.target.value))} /></div>
               <div className="field"><label>{t('Amount (DZD)')}</label>
                 <input type="number" min="0" value={amount} onChange={(e) => setAmount(Number(e.target.value))} /></div>
               {weekly && (
@@ -609,12 +676,48 @@ function RenewForm({ member: m, onClose, onSave }) {
                     ))}
                   </div></div>
               )}
+              {payFields}
             </div>
           )}
         </div>
         <div className="modal-foot">
           <button className="btn ghost" onClick={onClose}>{t('Cancel')}</button>
           <button className="btn primary" onClick={submit}>{isSession ? t('Add sessions') : t('Extend subscription')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Collect part or all of a member's outstanding balance. Defaults to the full
+// amount owed; staff can take a smaller instalment, leaving the rest on balance.
+function CollectBalanceForm({ member: m, onClose, onSave }) {
+  const t = useT();
+  const [amount, setAmount] = useState(m.balance);
+  const pay = Math.min(m.balance, Math.max(0, Number(amount) || 0));
+  const remaining = Math.max(0, m.balance - pay);
+  return (
+    <div className="modal-center" onClick={onClose}>
+      <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('Collect payment')}>
+        <div className="modal-head">
+          <div className="modal-title">{t('Collect payment — {name}', { name: m.name })}</div>
+          <button className="x-btn" onClick={onClose} aria-label={t('Close')}>×</button>
+        </div>
+        <div className="modal-body">
+          <div className="form-grid">
+            <div className="field"><label>{t('Outstanding balance')}</label>
+              <input disabled value={dzd(m.balance)} /></div>
+            <div className="field"><label>{t('Amount to collect (DZD)')}</label>
+              <input type="number" min="0" max={m.balance} value={amount} autoFocus
+                onChange={(e) => setAmount(Number(e.target.value))} /></div>
+            <div className="field"><label>{t('Remaining after')}</label>
+              <input disabled value={dzd(remaining)}
+                style={remaining > 0 ? { color: 'var(--red)', fontWeight: 700 } : { color: 'var(--green)', fontWeight: 700 }} /></div>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>{t('Cancel')}</button>
+          <button className="btn primary" onClick={() => onSave(pay)} disabled={pay <= 0}>{t('Collect {amount}', { amount: dzd(pay) })}</button>
         </div>
       </div>
     </div>

@@ -288,6 +288,20 @@ function Dashboard() {
     }
   }, [showToast]);
 
+  const payBalance = useCallback(async (id, amount) => {
+    try {
+      const saved = await api(`/members/${id}/pay-balance`, { method: 'POST', body: { amount } });
+      setMembers((ms) => ms.map((x) => (x.id === saved.id ? saved : x)));
+      const d = await api('/bootstrap');
+      setToday(d.today);
+      showToast('Payment collected — {name}', { name: saved.name });
+      return saved;
+    } catch (e) {
+      showToast('Payment failed: {msg}', { msg: e.message });
+      return null;
+    }
+  }, [showToast]);
+
   const payInsurance = useCallback(async (id) => {
     try {
       const saved = await api(`/members/${id}/insurance`, { method: 'POST' });
@@ -383,10 +397,10 @@ function Dashboard() {
 
   const ctx = useMemo(() => ({
     members, presence, exits, today, stock, stockLog, consumed, pricing,
-    saveMember, renewMember, payInsurance, deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing,
+    saveMember, renewMember, payInsurance, payBalance, deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing,
     savePreferences, simulateSwipe, handleSwipe, addGuestSession, removeGuestSession, showToast,
     daysRemaining, memberStatus, setRoute, focusMemberId, setFocusMemberId,
-  }), [members, presence, exits, today, stock, stockLog, consumed, pricing, saveMember, renewMember, payInsurance,
+  }), [members, presence, exits, today, stock, stockLog, consumed, pricing, saveMember, renewMember, payInsurance, payBalance,
        deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing, savePreferences, simulateSwipe, handleSwipe,
        addGuestSession, removeGuestSession, showToast, focusMemberId]);
 

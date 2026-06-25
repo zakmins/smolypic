@@ -11,7 +11,7 @@ export default function LiveStatus() {
   const { members, presence, exits, today, setRoute, setFocusMemberId, removeGuestSession } = useContext(AppCtx);
   const t = useT();
   const [, tick] = useState(0);
-  const [modal, setModal] = useState(null);   // 'inside' | 'exits' | 'subscribed' | 'entries' | 'owed' | 'expiring' | null
+  const [modal, setModal] = useState(null);   // 'inside' | 'exits' | 'subscribed' | 'entries' | 'owed' | 'expiring' | 'balances' | null
   const [subscribed, setSubscribed] = useState(null);   // fetched on open
   const [entriesToday, setEntriesToday] = useState(null);
   const [owedList, setOwedList] = useState(null);
@@ -40,6 +40,10 @@ export default function LiveStatus() {
   // `members`, which both the swipe and renew responses refresh in AppCtx.
   const owedCount = members.filter(isSessionsOwed).length;
   const expiringCount = members.filter((m) => expiringReason(m) != null).length;
+  // Members carrying an unpaid membership balance, most owed first, with the
+  // total still to collect across the club.
+  const balanceRows = members.filter((m) => m.balance > 0).sort((a, b) => b.balance - a.balance);
+  const balanceTotal = balanceRows.reduce((s, m) => s + m.balance, 0);
 
   // Lists for the fetched modals load lazily when their card is opened.
   useEffect(() => {
@@ -250,6 +254,24 @@ export default function LiveStatus() {
     );
   };
 
+  const balanceRow = (m) => (
+    <div key={`b-${m.id}`} className="live-row" onClick={() => goToMember(m.id)}
+      role="button" title={t("Open {name}'s profile", { name: m.name })}>
+      <Avatar member={m} />
+      <div style={{ minWidth: 0 }}>
+        <div className="live-name">{m.name}</div>
+        <div className="live-meta">
+          {m.sports.map((sp) => <SportBadge key={sp} sport={sp} />)}
+          <MembershipBadge member={m} />
+        </div>
+      </div>
+      <div style={{ textAlign: 'right', marginLeft: 'auto' }}>
+        <div className="live-name" style={{ color: 'var(--red)', fontSize: 14 }}>{t('owes {amount}', { amount: dzd(m.balance) })}</div>
+        <div className="live-remaining">{m.phone}</div>
+      </div>
+    </div>
+  );
+
   const card = (key, label, count, sub, color) => (
     <div className="stat-card clickable" role="button" tabIndex={0}
       onClick={() => setModal(key)}
@@ -261,8 +283,8 @@ export default function LiveStatus() {
     </div>
   );
 
-  const titles = { inside: t('Currently inside'), exits: t('Recent exits'), subscribed: t('Subscribed today'), entries: t('Entries today'), owed: t('Sessions owed'), expiring: t('Expiring soon') };
-  const counts = { inside: insideRows.length, exits: recentExits.length, subscribed: today.subscriptionCount, entries: today.entries, owed: owedCount, expiring: expiringCount };
+  const titles = { inside: t('Currently inside'), exits: t('Recent exits'), subscribed: t('Subscribed today'), entries: t('Entries today'), owed: t('Sessions owed'), expiring: t('Expiring soon'), balances: t('Outstanding balances') };
+  const counts = { inside: insideRows.length, exits: recentExits.length, subscribed: today.subscriptionCount, entries: today.entries, owed: owedCount, expiring: expiringCount, balances: balanceRows.length };
 
   const renderBody = () => {
     if (modal === 'inside') {
@@ -309,6 +331,11 @@ export default function LiveStatus() {
         ? <div className="empty-state">{t('No memberships about to lapse.')}</div>
         : expiringList.map(expiringRow);
     }
+    if (modal === 'balances') {
+      return balanceRows.length === 0
+        ? <div className="empty-state">{t('No outstanding balances — every membership is paid up.')}</div>
+        : balanceRows.map(balanceRow);
+    }
     return null;
   };
 
@@ -328,6 +355,7 @@ export default function LiveStatus() {
         {card('entries', t('Entries today'), today.entries, t('swipes & sessions today'))}
         {card('expiring', t('Expiring soon'), expiringCount, t('lapsing on date or sessions'), expiringCount ? 'var(--red)' : undefined)}
         {card('owed', t('Sessions owed'), owedCount, t('club owes — collect payment'), owedCount ? 'var(--amber)' : undefined)}
+        {card('balances', t('Outstanding balances'), balanceRows.length, balanceRows.length ? t('{amount} to collect', { amount: dzd(balanceTotal) }) : t('all memberships paid up'), balanceRows.length ? 'var(--red)' : undefined)}
       </div>
 
       {modal && (

@@ -134,6 +134,7 @@ function allMembers(db) {
       sessionsLeft: r.sessions_left,
       amountPaid: pay.total,
       paymentDate: pay.last || r.join_date,
+      balance: r.balance || 0,
       insurance: !!r.insurance,
       insuranceExpiry: r.insurance_expiry,
       hasPhoto: !!photoUpdated,
@@ -414,18 +415,22 @@ function createMember(db, { body, user }) {
   const sessionsLeft = body.sessionsLeft != null ? body.sessionsLeft : sessionsTotal;
   // Insurance is a 500 DZD/year fee: enrolling sets a one-year expiry + a payment.
   const insExpiry = body.insurance ? iso(new Date(now.getTime() + INSURANCE_DAYS * 86400000)) : null;
+  // Partial payments: `amountPaid` is the cash collected now; `total` (when given)
+  // is the full membership fee. Whatever is still owed becomes the member balance.
+  const amount = Math.max(0, Math.round(Number(body.amountPaid) || 0));
+  const total = body.total != null ? Math.max(0, Math.round(Number(body.total))) : amount;
+  const balance = Math.max(0, total - amount);
   const info = db.prepare(
     `INSERT INTO members (rfid_uid,name,gender,dob,phone,sports,membership_type,
        sub_start,sub_end,duration_days,sessions_total,sessions_left,
-       insurance,insurance_expiry,hue,join_date)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       insurance,insurance_expiry,balance,hue,join_date)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   ).run(
     rfid, body.name, body.gender ?? 'M', body.dob ?? null, body.phone ?? null,
     JSON.stringify(sports), body.membershipType ?? 'subscription', subStart, subEnd, body.durationDays ?? 30,
-    sessionsTotal, sessionsLeft, body.insurance ? 1 : 0, insExpiry,
+    sessionsTotal, sessionsLeft, body.insurance ? 1 : 0, insExpiry, balance,
     body.hue != null ? body.hue : now.getMilliseconds() % 360, iso(now),
   );
-  const amount = body.amountPaid || 0;
   if (amount) {
     db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
       .run(info.lastInsertRowid, amount, isSession ? 'session' : 'subscription', sports[0], 'Cash', iso(now));
@@ -438,7 +443,8 @@ function createMember(db, { body, user }) {
   const plan = isSession ? `${sessionsTotal} sessions`
     : (sessionsTotal != null ? `metered ${body.durationDays ?? 30}d / ${sessionsTotal} sessions` : `unlimited ${body.durationDays ?? 30}d`);
   logActivity(db, user.id, 'member.create', body.name,
-    `Registered member ${body.name} — ${sports.join(', ')}, ${plan}` + (amount ? ` (${amount} DZD)` : ''));
+    `Registered member ${body.name} — ${sports.join(', ')}, ${plan}`
+    + (amount ? ` (${amount} DZD)` : '') + (balance ? ` — balance due ${balance} DZD` : ''));
   return memberRowToDict(db, getMember(db, info.lastInsertRowid));
 }
 
@@ -541,12 +547,41 @@ function renewMember(db, { params, body, user }) {
   if (!parts.length) throw new HttpError(400, 'Provide days or sessions');
   // Date extension ⇒ subscription revenue; sessions-only ⇒ pay-per-session.
   const kind = body.days ? 'subscription' : 'session';
-  const detail = `Renewed ${m.name}: ${parts.join(', ')}`;
-  if (body.amount) {
-    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
-      .run(id, body.amount, kind, JSON.parse(m.sports)[0], 'Cash', iso(now));
+  // Partial payment: `amount` is cash collected now; `total` (when given) is the
+  // full renewal fee. Any shortfall is added to the member's running balance.
+  const amount = Math.max(0, Math.round(Number(body.amount) || 0));
+  const total = body.total != null ? Math.max(0, Math.round(Number(body.total))) : amount;
+  const owedNow = Math.max(0, total - amount);
+  if (owedNow) {
+    db.prepare('UPDATE members SET balance=balance+? WHERE id=?').run(owedNow, id);
+    parts.push(`balance due ${owedNow} DZD`);
   }
-  logActivity(db, user.id, 'member.renew', m.name, detail + (body.amount ? ` (${body.amount} DZD)` : ''));
+  const detail = `Renewed ${m.name}: ${parts.join(', ')}`;
+  if (amount) {
+    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
+      .run(id, amount, kind, JSON.parse(m.sports)[0], 'Cash', iso(now));
+  }
+  logActivity(db, user.id, 'member.renew', m.name, detail + (amount ? ` (${amount} DZD)` : ''));
+  return memberRowToDict(db, getMember(db, id));
+}
+
+// Collect (part of) an outstanding membership balance. Records the cash as
+// subscription revenue and draws the member's balance down, never below zero.
+function payBalance(db, { params, body, user }) {
+  const id = Number(params[0]);
+  const m = getMember(db, id);
+  const now = new Date();
+  if (!m.balance || m.balance <= 0) throw new HttpError(400, 'No outstanding balance to collect');
+  // Default to clearing the whole balance; cap a larger amount at what is owed.
+  const requested = body.amount != null ? Math.round(Number(body.amount)) : m.balance;
+  const amount = Math.min(m.balance, Math.max(0, requested));
+  if (!amount) throw new HttpError(400, 'Enter an amount greater than zero');
+  db.prepare('UPDATE members SET balance=balance-? WHERE id=?').run(amount, id);
+  db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
+    .run(id, amount, 'subscription', JSON.parse(m.sports)[0], 'Cash', iso(now));
+  const left = m.balance - amount;
+  logActivity(db, user.id, 'member.balance', m.name,
+    `Collected ${amount} DZD from ${m.name}` + (left ? ` — ${left} DZD still owed` : ' — balance cleared'));
   return memberRowToDict(db, getMember(db, id));
 }
 
@@ -1228,6 +1263,7 @@ const ROUTES = [
   { m: 'PUT', re: /^\/members\/(\d+)$/, auth: true, fn: updateMember },
   { m: 'DELETE', re: /^\/members\/(\d+)$/, auth: true, fn: deleteMember },
   { m: 'POST', re: /^\/members\/(\d+)\/renew$/, auth: true, fn: renewMember },
+  { m: 'POST', re: /^\/members\/(\d+)\/pay-balance$/, auth: true, fn: payBalance },
   { m: 'POST', re: /^\/members\/(\d+)\/insurance$/, auth: true, fn: payInsurance },
   { m: 'GET', re: /^\/members\/(\d+)\/entries$/, fn: memberEntries },
   { m: 'GET', re: /^\/stats$/, fn: stats },

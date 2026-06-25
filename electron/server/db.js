@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS members (
   sessions_left INTEGER,            -- may go negative: club owes sessions
   insurance INTEGER NOT NULL DEFAULT 0,
   insurance_expiry TEXT,            -- end of the paid insurance year (NULL ⇒ never enrolled)
+  balance INTEGER NOT NULL DEFAULT 0, -- unpaid membership fees still owed (DZD); 0 ⇒ fully paid
   hue INTEGER NOT NULL DEFAULT 0,
   join_date TEXT NOT NULL
 );
@@ -276,6 +277,9 @@ function openDb(dbPath) {
   // Per-user UI preferences (theme + language). NULL ⇒ fall back to app defaults.
   ensureColumn(db, 'users', 'theme', 'TEXT');
   ensureColumn(db, 'users', 'language', 'TEXT');
+  // Outstanding membership balance — added for partial payments. Older databases
+  // predate the column; default 0 means "fully paid" for every existing member.
+  ensureColumn(db, 'members', 'balance', 'INTEGER NOT NULL DEFAULT 0');
   // payments.walk_in marks anonymous "+ Session" drop-ins, so deleting a member
   // never reclassifies their session payments as walk-ins (deletion nulls
   // member_id). Backfill ONCE on upgrade: before this column existed, the only
@@ -347,6 +351,7 @@ function memberRowToDict(db, r) {
     sessionsLeft: r.sessions_left,
     amountPaid: pay.total,
     paymentDate: pay.last || r.join_date,
+    balance: r.balance || 0,
     insurance: !!r.insurance,
     insuranceExpiry: r.insurance_expiry,
     hasPhoto: !!photo,

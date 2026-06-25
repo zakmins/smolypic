@@ -2,6 +2,25 @@
 // Anything not listed here falls back to the English source. Placeholders like
 // {n} are preserved and filled at render time.
 export const FR = {
+  // ── Partial payments / outstanding balances ──
+  "Amount paid now (DZD)": "Montant payé maintenant (DZD)",
+  "Balance due": "Solde dû",
+  "Outstanding balance": "Solde restant",
+  "Outstanding balances": "Soldes impayés",
+  "Amount to collect (DZD)": "Montant à encaisser (DZD)",
+  "Remaining after": "Restant après",
+  "Collect payment": "Encaisser le paiement",
+  "Collect payment — {name}": "Encaisser le paiement — {name}",
+  "Collect {amount}": "Encaisser {amount}",
+  "owes {amount}": "doit {amount}",
+  "{amount} still owed on this membership": "{amount} encore dû sur cette adhésion",
+  "{amount} to collect": "{amount} à encaisser",
+  "all memberships paid up": "toutes les adhésions sont réglées",
+  "Owing balance": "Solde impayé",
+  "No outstanding balances — every membership is paid up.": "Aucun solde impayé — toutes les adhésions sont réglées.",
+  "Payment collected — {name}": "Paiement encaissé — {name}",
+  "Payment failed: {msg}": "Échec du paiement : {msg}",
+
   // ── App shell: loading, errors, toasts ──
   "Nothing here yet — coming soon.": "Rien ici pour l'instant — bientôt disponible.",
   "Member reports — coming soon.": "Rapports des membres — bientôt disponible.",

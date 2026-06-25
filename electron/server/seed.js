@@ -97,6 +97,7 @@ function seed(db) {
     const meteredIdx = new Set([3, 8, 14, 20, 27]);     // healthy METERED subs
     const expiredIdx = new Set([5, 13, 21, 29]);        // subscription already over (by date)
     const owedIdx = new Set([6, 22]);                   // pay-per-session, club owes sessions
+    const balanceIdx = new Map([[3, 1500], [11, 3000], [27, 800]]);   // paid only a deposit ⇒ owes the rest
     const insertMember = db.prepare(
       `INSERT INTO members (rfid_uid,name,gender,dob,phone,sports,membership_type,
          sub_start,sub_end,duration_days,sessions_total,sessions_left,
@@ -161,6 +162,8 @@ function seed(db) {
         isoDate(subStart), isoDate(subEnd), dur, sessionsTotal, sessionsLeft,
         insured ? 1 : 0, insExpiry, R.randint(0, 359), iso(join),
       );
+      // A few members registered with a partial payment ⇒ they still owe a balance.
+      if (balanceIdx.has(i)) db.prepare('UPDATE members SET balance=? WHERE id=?').run(balanceIdx.get(i), info.lastInsertRowid);
       memberIds.push(info.lastInsertRowid);
     }
 
