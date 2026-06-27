@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { Avatar, SportBadge, MembershipBadge, Icons } from '../components/atoms.jsx';
 import { hhmmss, fmtTime, fmtDate, durationLabel, daysRemaining, memberStatus, usesSessionQuota, isSessionsOwed, expiringReason, initials, dzd } from '../utils.js';
 import { useT } from '../i18n.jsx';
+import Portal from '../components/Portal.jsx';
 
 const TWO_HOURS = 2 * 3600 * 1000;
 
@@ -359,6 +360,7 @@ export default function LiveStatus() {
       </div>
 
       {modal && (
+        <Portal>
         <div className="modal-center" onClick={() => setModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={titles[modal]}>
             <div className="modal-head">
@@ -369,6 +371,7 @@ export default function LiveStatus() {
             <div className="modal-body kpi-list" style={{ padding: 0 }}>{renderBody()}</div>
           </div>
         </div>
+        </Portal>
       )}
     </>
   );

@@ -111,6 +111,21 @@ export const insuranceDaysLeft = (m) =>
   m.insuranceExpiry ? Math.ceil((new Date(m.insuranceExpiry) - Date.now()) / 86400000) : null;
 
 export const dzd = (n) => `${Number(n).toLocaleString('en-US')} DZD`;
+
+// ── Sell-by-weight supplements ────────────────────────────────────────────────
+// Weight items track stock in grams (item.unit === 'g') and are sold as scoops.
+// fmtWeight shows grams under 1 kg and kg above, trimming trailing zeros
+// ("250 g", "12 kg", "4.5 kg"). fmtStockQty picks the right unit for any item.
+export const isWeightItem = (it) => it?.unit === 'g';
+export const fmtWeight = (grams) => {
+  const g = Math.round(Number(grams) || 0);
+  if (Math.abs(g) < 1000) return `${g} g`;
+  const kg = g / 1000;
+  return `${Number(kg.toFixed(2))} kg`;   // toFixed→Number drops trailing zeros (12.00→12)
+};
+export const fmtStockQty = (it) => (isWeightItem(it) ? fmtWeight(it.qty) : String(it.qty));
+// Per-gram buy cost → DZD per kg, for display (weight items store buy per gram).
+export const buyPerKg = (it) => Math.round((Number(it.buy) || 0) * 1000);
 export const initials = (name) => name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase();
 export const fmtDate = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 export const fmtTime = (ts) => new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });

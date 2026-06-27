@@ -6,6 +6,7 @@ import Select from '../components/Select.jsx';
 import { initials, fmtDate, fmtTime, pageList, dayKey } from '../utils.js';
 import { useAuth } from '../auth.jsx';
 import { useT } from '../i18n.jsx';
+import Portal from '../components/Portal.jsx';
 
 // A few on-brand presets alongside the native picker.
 const PRESETS = ['#10D98E', '#0FBFB4', '#4D9FFF', '#B07CFF', '#FFB224', '#FF5468', '#22C7E6', '#2BD786'];
@@ -134,6 +135,7 @@ export default function Users() {
       {editing && <UserForm user={editing === 'new' ? null : editing}
         onClose={() => setEditing(null)} onSave={save} />}
       {confirmDelete && (
+        <Portal>
         <div className="modal-center" onClick={() => setConfirmDelete(null)}>
           <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-head"><div className="modal-title">{t('Delete coach')}</div></div>
@@ -146,6 +148,7 @@ export default function Users() {
             </div>
           </div>
         </div>
+        </Portal>
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
     </>
@@ -170,6 +173,7 @@ function UserForm({ user, onClose, onSave }) {
   };
 
   return (
+    <Portal>
     <div className="modal-center" onClick={onClose}>
       <div className="modal" style={{ width: 560 }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('User form')}>
         <div className="modal-head">
@@ -224,6 +228,7 @@ function UserForm({ user, onClose, onSave }) {
         </div>
       </div>
     </div>
+    </Portal>
   );
 }
 
@@ -298,6 +303,7 @@ function HistoryDrawer({ user, onClose, onEdit, onDelete }) {
   const hasFilter = !!(day || q || group !== 'all');
 
   return (
+    <Portal>
     <div className="overlay" onClick={onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('{name} history', { name: user.fullName || user.username })}>
         <div className="modal-head">
@@ -389,5 +395,6 @@ function HistoryDrawer({ user, onClose, onEdit, onDelete }) {
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

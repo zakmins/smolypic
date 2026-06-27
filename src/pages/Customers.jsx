@@ -9,6 +9,7 @@ import { SPORTS, dzd, fmtDate, age, daysRemaining, memberStatus, fmtTime, durati
   defaultSessionPrice, monthlySubPrice } from '../utils.js';
 import { api } from '../api.js';
 import { useT } from '../i18n.jsx';
+import Portal from '../components/Portal.jsx';
 
 const SORTS = {
   name: { label: 'Name A–Z', fn: (a, b) => a.name.localeCompare(b.name) },
@@ -156,6 +157,7 @@ export default function Customers() {
           onSave={(amount) => { payBalance(collecting.id, amount); setCollecting(null); }} />
       )}
       {confirmDelete && (
+        <Portal>
         <div className="modal-center" onClick={() => setConfirmDelete(null)}>
           <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-head"><div className="modal-title">{t('Delete member')}</div></div>
@@ -168,6 +170,7 @@ export default function Customers() {
             </div>
           </div>
         </div>
+        </Portal>
       )}
     </>
   );
@@ -205,6 +208,7 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
   }, [onClose]);
 
   return (
+    <Portal>
     <div className="overlay" onClick={onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('{name} profile', { name: m.name })}>
         <div className="modal-head">
@@ -327,6 +331,7 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
         </div>
       </div>
     </div>
+    </Portal>
   );
 }
 
@@ -515,6 +520,7 @@ function MemberForm({ member, onClose, onSave }) {
   };
 
   return (
+    <Portal>
     <div className="modal-center" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('Member form')}>
         <div className="modal-head">
@@ -590,6 +596,7 @@ function MemberForm({ member, onClose, onSave }) {
         </div>
       </div>
     </div>
+    </Portal>
   );
 }
 
@@ -646,6 +653,7 @@ function RenewForm({ member: m, onClose, onSave }) {
   );
 
   return (
+    <Portal>
     <div className="modal-center" onClick={onClose}>
       <div className="modal" style={{ width: 440 }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('Renew membership')}>
         <div className="modal-head">
@@ -686,6 +694,7 @@ function RenewForm({ member: m, onClose, onSave }) {
         </div>
       </div>
     </div>
+    </Portal>
   );
 }
 
@@ -697,6 +706,7 @@ function CollectBalanceForm({ member: m, onClose, onSave }) {
   const pay = Math.min(m.balance, Math.max(0, Number(amount) || 0));
   const remaining = Math.max(0, m.balance - pay);
   return (
+    <Portal>
     <div className="modal-center" onClick={onClose}>
       <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('Collect payment')}>
         <div className="modal-head">
@@ -721,5 +731,6 @@ function CollectBalanceForm({ member: m, onClose, onSave }) {
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

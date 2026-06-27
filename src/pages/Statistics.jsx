@@ -5,6 +5,7 @@ import { LineChart, BarChart, Donut, Heatmap } from '../charts/Charts.jsx';
 import { dzd, fmtDate, memberStatus } from '../utils.js';
 import { api } from '../api.js';
 import { useT } from '../i18n.jsx';
+import Portal from '../components/Portal.jsx';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = Array.from({ length: 15 }, (_, i) => `${String(i + 8).padStart(2, '0')}h`);
@@ -217,6 +218,7 @@ export default function Statistics() {
         };
         const view = views[kpiModal];
         return (
+          <Portal>
           <div className="modal-center" onClick={() => setKpiModal(null)}>
             <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={view.title}>
               <div className="modal-head">
@@ -250,6 +252,7 @@ export default function Statistics() {
               </div>
             </div>
           </div>
+          </Portal>
         );
       })()}
     </>

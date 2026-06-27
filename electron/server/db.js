@@ -87,13 +87,16 @@ CREATE TABLE IF NOT EXISTS stock_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   category TEXT NOT NULL,
-  qty INTEGER NOT NULL,
+  qty INTEGER NOT NULL,            -- whole units, OR grams when unit='g'
   min INTEGER NOT NULL,
-  buy INTEGER,
-  sell INTEGER,
+  buy REAL,                        -- DZD per unit (per gram for weight items)
+  sell INTEGER,                    -- single sell price (NULL for weight items: priced per scoop)
   supplier TEXT,
   expiry TEXT,
-  last_restock TEXT
+  last_restock TEXT,
+  unit TEXT NOT NULL DEFAULT 'unit',  -- 'unit' (whole pieces) | 'g' (sold by weight / scoop)
+  container_size INTEGER,             -- grams per container (weight items), for restock & "sell whole"
+  portions TEXT                       -- JSON [{ "g": 100, "price": 150 }, …] scoop presets (weight items)
 );
 CREATE TABLE IF NOT EXISTS stock_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -280,6 +283,13 @@ function openDb(dbPath) {
   // Outstanding membership balance — added for partial payments. Older databases
   // predate the column; default 0 means "fully paid" for every existing member.
   ensureColumn(db, 'members', 'balance', 'INTEGER NOT NULL DEFAULT 0');
+  // Sell-by-weight supplements: items tracked in grams and sold as scoops. Older
+  // databases predate these; existing rows default to whole-unit items (unit='unit',
+  // no container/portions), so nothing changes for them. buy stays declared INTEGER
+  // on old DBs but SQLite's type affinity stores the fractional per-gram cost as REAL.
+  ensureColumn(db, 'stock_items', 'unit', "TEXT NOT NULL DEFAULT 'unit'");
+  ensureColumn(db, 'stock_items', 'container_size', 'INTEGER');
+  ensureColumn(db, 'stock_items', 'portions', 'TEXT');
   // payments.walk_in marks anonymous "+ Session" drop-ins, so deleting a member
   // never reclassifies their session payments as walk-ins (deletion nulls
   // member_id). Backfill ONCE on upgrade: before this column existed, the only

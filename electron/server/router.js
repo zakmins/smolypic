@@ -148,19 +148,38 @@ function allMembers(db) {
 
 function stockPayload(db) {
   const items = db.prepare('SELECT * FROM stock_items ORDER BY id').all().map((r) => {
-    const it = { ...r, lastRestock: r.last_restock };
+    const it = {
+      ...r,
+      lastRestock: r.last_restock,
+      unit: r.unit || 'unit',
+      containerSize: r.container_size ?? null,
+      portions: r.portions ? safeParsePortions(r.portions) : [],
+    };
     delete it.last_restock;
+    delete it.container_size;
     return it;
   });
   const log = db.prepare('SELECT * FROM stock_log ORDER BY date DESC LIMIT 60').all().map((r) => ({
     id: r.id, itemId: r.item_id, action: r.action, qty: r.qty, reason: r.reason, cost: r.cost, date: r.date,
   }));
   const monthAgo = iso(new Date(Date.now() - 30 * 86400000));
+  // "Most consumed" — weight items report grams; the client formats g/kg via `unit`.
   const consumed = db.prepare(
-    "SELECT si.name, SUM(sl.qty) q FROM stock_log sl JOIN stock_items si ON si.id=sl.item_id "
+    "SELECT si.name, si.unit unit, SUM(sl.qty) q FROM stock_log sl JOIN stock_items si ON si.id=sl.item_id "
     + "WHERE sl.action='remove' AND sl.date>=? GROUP BY si.id ORDER BY q DESC LIMIT 8",
-  ).all(monthAgo).map((r) => ({ name: r.name, qty: r.q }));
+  ).all(monthAgo).map((r) => ({ name: r.name, qty: r.q, unit: r.unit || 'unit' }));
   return { stock: items, stockLog: log, consumed };
+}
+
+// Portions are user-entered JSON; never let a corrupt row crash the payload.
+function safeParsePortions(json) {
+  try {
+    const arr = JSON.parse(json);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((p) => ({ g: Math.round(Number(p.g)), price: Math.round(Number(p.price)) }))
+      .filter((p) => p.g > 0 && p.price >= 0);
+  } catch { return []; }
 }
 
 function competitions(db, table, memberId) {
@@ -874,16 +893,20 @@ function stockDashboard(db) {
   };
 
   // Sold this month: revenue (logged sale price, else qty×sell), units, and COGS.
+  // "units" counts a weight sale (sold by the gram) as one item, not its gram count,
+  // so a 200 g scoop doesn't read as 200 units. Money columns stay gram-accurate
+  // because buy/sell are per-gram for weight items (qty grams × per-gram price).
+  const UNITS = "SUM(CASE WHEN si.unit='g' THEN 1 ELSE sl.qty END)";
   const sold = db.prepare(
     'SELECT COALESCE(SUM(COALESCE(sl.cost, sl.qty * si.sell)),0) rev, '
-    + 'COALESCE(SUM(sl.qty),0) units, COALESCE(SUM(sl.qty * si.buy),0) cogs '
+    + `COALESCE(${UNITS},0) units, COALESCE(SUM(sl.qty * si.buy),0) cogs `
     + 'FROM stock_log sl JOIN stock_items si ON si.id=sl.item_id '
     + "WHERE sl.action='remove' AND sl.reason='Sold' AND sl.date>=?",
   ).get(monthStart);
 
   // Write-offs this month, valued at purchase cost.
   const loss = db.prepare(
-    'SELECT COALESCE(SUM(sl.qty * si.buy),0) val, COALESCE(SUM(sl.qty),0) units '
+    `SELECT COALESCE(SUM(sl.qty * si.buy),0) val, COALESCE(${UNITS},0) units `
     + 'FROM stock_log sl JOIN stock_items si ON si.id=sl.item_id '
     + "WHERE sl.action='remove' AND sl.reason IN ('Damaged','Expired') AND sl.date>=?",
   ).get(monthStart);
@@ -1099,11 +1122,31 @@ function setWrestlingSchedule(db, { body, user }) {
   return wrestling(db);
 }
 
+// Normalise the weight-tracking fields from an incoming item body. A whole-unit
+// item stores unit='unit' and null container/portions; a weight item stores
+// unit='g', its container size in grams, and its scoop presets as JSON.
+function weightFields(body) {
+  if (body.unit !== 'g') return { unit: 'unit', containerSize: null, portions: null };
+  const cs = Number(body.containerSize);
+  const portions = Array.isArray(body.portions)
+    ? body.portions
+      .map((p) => ({ g: Math.round(Number(p.g)), price: Math.round(Number(p.price)) }))
+      .filter((p) => p.g > 0 && p.price >= 0)
+    : [];
+  return {
+    unit: 'g',
+    containerSize: Number.isFinite(cs) && cs > 0 ? Math.round(cs) : null,
+    portions: JSON.stringify(portions),
+  };
+}
+
 function createStock(db, { body, user }) {
+  const w = weightFields(body);
   db.prepare(
-    'INSERT INTO stock_items (name,category,qty,min,buy,sell,supplier,expiry,last_restock) VALUES (?,?,?,?,?,?,?,?,?)',
+    'INSERT INTO stock_items (name,category,qty,min,buy,sell,supplier,expiry,last_restock,unit,container_size,portions)'
+    + ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
   ).run(body.name, body.category, body.qty ?? 0, body.min ?? 0, body.buy ?? null, body.sell ?? null,
-    body.supplier ?? null, body.expiry ?? null, iso(new Date()).slice(0, 10));
+    body.supplier ?? null, body.expiry ?? null, iso(new Date()).slice(0, 10), w.unit, w.containerSize, w.portions);
   logActivity(db, user.id, 'stock.create', body.name, `Created stock item ${body.name} (${body.category}, qty ${body.qty ?? 0})`);
   return stockPayload(db);
 }
@@ -1112,16 +1155,18 @@ function updateStock(db, { params, body, user }) {
   const id = Number(params[0]);
   const old = db.prepare('SELECT * FROM stock_items WHERE id=?').get(id);
   if (!old) throw new HttpError(404, 'Stock item not found');
+  const w = weightFields(body);
   const fields = [
     [body.name, 'name', 'name'], [body.category, 'category', 'category'],
     [body.qty, 'qty', 'qty'], [body.min, 'min', 'min'], [body.buy, 'buy', 'buy cost'],
     [body.sell, 'sell', 'sell price'], [body.supplier, 'supplier', 'supplier'], [body.expiry, 'expiry', 'expiry'],
+    [w.unit, 'unit', 'sell mode'], [w.containerSize, 'container_size', 'container size'], [w.portions, 'portions', 'scoops'],
   ];
   const changed = fields.filter(([v, col]) => (v ?? null) !== old[col]).map(([, , label]) => label);
   db.prepare(
-    'UPDATE stock_items SET name=?,category=?,qty=?,min=?,buy=?,sell=?,supplier=?,expiry=? WHERE id=?',
+    'UPDATE stock_items SET name=?,category=?,qty=?,min=?,buy=?,sell=?,supplier=?,expiry=?,unit=?,container_size=?,portions=? WHERE id=?',
   ).run(body.name, body.category, body.qty, body.min, body.buy ?? null, body.sell ?? null,
-    body.supplier ?? null, body.expiry ?? null, id);
+    body.supplier ?? null, body.expiry ?? null, w.unit, w.containerSize, w.portions, id);
   const detail = changed.length ? `Edited stock item ${body.name} — ${changed.join(', ')}` : `Edited stock item ${body.name} — no changes`;
   logActivity(db, user.id, 'stock.update', body.name, detail);
   return stockPayload(db);

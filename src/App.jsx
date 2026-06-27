@@ -4,6 +4,7 @@ import { daysRemaining, memberStatus } from './utils.js';
 import Sidebar from './components/Sidebar.jsx';
 import TopBar from './components/TopBar.jsx';
 import SwipePopup from './components/SwipePopup.jsx';
+import ZoomViewport from './components/ZoomViewport.jsx';
 import LiveStatus from './pages/LiveStatus.jsx';
 import Customers from './pages/Customers.jsx';
 import Judo from './pages/Judo.jsx';
@@ -415,6 +416,7 @@ function Dashboard() {
 
   return (
     <AppCtx.Provider value={ctx}>
+      <ZoomViewport>
       <div className="shell">
         <Sidebar route={route} setRoute={setRoute} />
         <div className="main">
@@ -438,6 +440,7 @@ function Dashboard() {
           </div>
         </div>
       </div>
+      </ZoomViewport>
       {popupQueue.length > 0 && (
         <SwipePopup event={popupQueue[0]} queued={popupQueue.length - 1} onDismiss={dismissPopup} />
       )}

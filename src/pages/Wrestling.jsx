@@ -7,6 +7,7 @@ import { WEIGHT_CATS, age, fmtDate } from '../utils.js';
 import { BarChart } from '../charts/Charts.jsx';
 import { api } from '../api.js';
 import { useT } from '../i18n.jsx';
+import Portal from '../components/Portal.jsx';
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const RESULTS = [['gold', 'Gold'], ['silver', 'Silver'], ['bronze', 'Bronze'], ['loss', 'Loss']];
@@ -188,6 +189,7 @@ export default function Wrestling() {
       </div>
 
       {selected && form && (
+        <Portal>
         <div className="overlay" onClick={closeStudent}>
           <div className="drawer" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('Wrestler record')}>
             <div className="modal-head">
@@ -245,6 +247,7 @@ export default function Wrestling() {
             </div>
           </div>
         </div>
+        </Portal>
       )}
     </>
   );

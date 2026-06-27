@@ -135,6 +135,10 @@ input::placeholder { color: var(--faint); }
   -webkit-text-fill-color: transparent; color: transparent;
 }
 
+/* ── Zoom viewport (Ctrl/⌘ + scroll zooms toward the cursor; see ZoomViewport.jsx) ── */
+.zoom-viewport { width: 100vw; height: 100vh; overflow: hidden; }
+.zoom-canvas { width: 100%; height: 100%; transform-origin: 0 0; will-change: transform; }
+
 /* ── Shell ── */
 .shell { display: grid; grid-template-columns: 224px 1fr; height: 100vh; overflow: hidden; }
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -610,6 +614,7 @@ input::placeholder { color: var(--faint); }
 
 /* ── Stats / dashboard cards ── */
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+.stat-grid.five { grid-template-columns: repeat(5, 1fr); }
 .stat-card {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--r-md); padding: 17px 19px;
@@ -692,6 +697,19 @@ input::placeholder { color: var(--faint); }
 .sale-name { font-weight: 600; font-size: 13.5px; }
 .sale-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-top: 4px; }
 .sale-amount.mono { margin-left: auto; font-family: var(--mono); font-weight: 700; font-size: 14px; color: var(--green); white-space: nowrap; }
+/* ── Sell-by-weight: scoop editor (item form) & weight operation summary ── */
+.scoop-editor { display: flex; flex-direction: column; gap: 8px; }
+.scoop-row { display: flex; align-items: center; gap: 8px; }
+.scoop-row input { width: 0; flex: 1; }
+.scoop-x { flex: none; font-size: 12px; color: var(--muted); font-weight: 700; font-family: var(--mono); }
+.scoop-hint { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
+.weight-op-meta { font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 12px; }
+.weight-op-summary {
+  margin-top: 14px; padding: 10px 12px; border-radius: var(--r-sm);
+  background: var(--raised); font-weight: 700; font-size: 13.5px; color: var(--text);
+}
+.weight-op-summary.over { color: var(--red); }
+
 .kpi-list { max-height: 62vh; overflow-y: auto; }
 .kpi-list .live-row, .kpi-list .exit-row { cursor: pointer; }
 .kpi-list .live-row.guest { cursor: default; }
@@ -774,7 +792,7 @@ input::placeholder { color: var(--faint); }
 
 @media (max-width: 1280px) {
   .live-grid { grid-template-columns: 1fr; }
-  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .stat-grid, .stat-grid.five { grid-template-columns: repeat(2, 1fr); }
   .chart-grid { grid-template-columns: 1fr; }
 }
 
