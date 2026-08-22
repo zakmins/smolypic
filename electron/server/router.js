@@ -199,8 +199,9 @@ function resolveUser(db, token) {
 // ── handlers ────────────────────────────────────────────────────────────────
 function login(db, { body }) {
   const u = db.prepare('SELECT * FROM users WHERE username=?').get((body.username || '').trim());
-  if (!u || !u.active || !verifyPassword(body.password || '', u.password_salt, u.password_hash)) {
-    throw new HttpError(401, 'Wrong username or password');
+  if (!u || !u.active) throw new HttpError(401, 'No user with this username');
+  if (!verifyPassword(body.password || '', u.password_salt, u.password_hash)) {
+    throw new HttpError(401, 'Wrong password');
   }
   const token = crypto.randomBytes(32).toString('hex');
   db.prepare('INSERT INTO sessions (user_id,token,login_at) VALUES (?,?,?)').run(u.id, token, iso(new Date()));
@@ -458,12 +459,12 @@ function createMember(db, { body, user }) {
   const total = body.total != null ? Math.max(0, Math.round(Number(body.total))) : amount;
   const balance = Math.max(0, total - amount);
   const info = db.prepare(
-    `INSERT INTO members (rfid_uid,name,gender,dob,phone,sports,membership_type,
+    `INSERT INTO members (rfid_uid,name,gender,dob,phone,blood_type,sports,membership_type,
        sub_start,sub_end,duration_days,sessions_total,sessions_left,
        insurance,insurance_expiry,balance,hue,join_date)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   ).run(
-    rfid, body.name, body.gender ?? 'M', body.dob ?? null, body.phone ?? null,
+    rfid, body.name, body.gender ?? 'M', body.dob ?? null, body.phone ?? null, body.bloodType ?? null,
     JSON.stringify(sports), body.membershipType ?? 'subscription', subStart, subEnd, body.durationDays ?? 30,
     sessionsTotal, sessionsLeft, body.insurance ? 1 : 0, insExpiry, balance,
     body.hue != null ? body.hue : now.getMilliseconds() % 360, iso(now),
@@ -503,6 +504,7 @@ function updateMember(db, { params, body, user }) {
   if (body.gender !== old.gender) changed.push('gender');
   if ((body.dob || null) !== old.dob) changed.push('date of birth');
   if ((body.phone || null) !== old.phone) changed.push('phone');
+  if ((body.bloodType || null) !== old.blood_type) changed.push('blood type');
   if (JSON.stringify(body.sports) !== old.sports) changed.push('sports');
   if (body.membershipType !== old.membership_type) changed.push('membership type');
   if (body.durationDays !== old.duration_days) changed.push('duration');
@@ -511,13 +513,13 @@ function updateMember(db, { params, body, user }) {
   if (body.rfidUid && body.rfidUid !== old.rfid_uid) changed.push('RFID tag');
 
   db.prepare(
-    `UPDATE members SET name=?,gender=?,dob=?,phone=?,sports=?,membership_type=?,
+    `UPDATE members SET name=?,gender=?,dob=?,phone=?,blood_type=?,sports=?,membership_type=?,
        sub_start=COALESCE(?,sub_start),sub_end=COALESCE(?,sub_end),duration_days=?,
        sessions_total=?,sessions_left=?,insurance=?,insurance_expiry=?,
        rfid_uid=COALESCE(?,rfid_uid)
      WHERE id=?`,
   ).run(
-    body.name, body.gender, body.dob ?? null, body.phone ?? null, JSON.stringify(body.sports),
+    body.name, body.gender, body.dob ?? null, body.phone ?? null, body.bloodType ?? null, JSON.stringify(body.sports),
     body.membershipType, body.subStart ? isoDate(body.subStart) : null, body.subEnd ? isoDate(body.subEnd) : null, body.durationDays,
     sessionsTotal, sessionsLeft, nowInsured ? 1 : 0, insExpiry,
     body.rfidUid ?? null, id,

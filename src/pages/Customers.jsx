@@ -48,7 +48,7 @@ export default function Customers() {
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return members
-      .filter((m) => !needle || m.name.toLowerCase().includes(needle) || m.phone.replace(/\s/g, '').includes(needle.replace(/\s/g, '')))
+      .filter((m) => !needle || m.name.toLowerCase().includes(needle) || (m.phone || '').replace(/\s/g, '').includes(needle.replace(/\s/g, '')))
       .filter((m) => gender === 'all' || m.gender === gender)
       .filter((m) => sport === 'all' || m.sports.includes(sport))
       .filter((m) => {
@@ -245,6 +245,7 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
             <span className="k">{t('Date of birth')}</span><span className="v">{fmtDate(m.dob)} · {t('{n} yrs', { n: age(m.dob) })}</span>
             <span className="k">{t('Phone')}</span><span className="v mono">{m.phone}</span>
             <span className="k">{t('Gender')}</span><span className="v">{m.gender === 'M' ? t('Male') : t('Female')}</span>
+            {m.bloodType && <><span className="k">{t('Blood type')}</span><span className="v">{m.bloodType}</span></>}
             <span className="k">{t('RFID tag')}</span><span className="v mono">{m.rfidUid}</span>
             {!isSession && <><span className="k">{t('Subscription')}</span><span className="v">{fmtDate(m.subStart)} → {fmtDate(m.subEnd)}</span></>}
             {isSubscription(m) && <><span className="k">{t('Access')}</span><span className="v">{isUnlimitedSub(m) ? t('Unlimited') : t('Metered — {left} / {total} sessions', { left: m.sessionsLeft, total: m.sessionsTotal })}</span></>}
@@ -364,8 +365,10 @@ const monthlyQuotaOf = (m) => {
   return Math.round(m.sessionsTotal / months);
 };
 
+const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+
 const blank = () => ({
-  name: '', gender: 'M', dob: '2000-01-01', phone: '',
+  name: '', gender: 'M', dob: '2000-01-01', phone: '', bloodType: '',
   category: 'GYM', planId: null,
   months: 1, monthlyPrice: 2500, insurance: false, rfidUid: '', photo: undefined,
 });
@@ -460,6 +463,7 @@ function MemberForm({ member, onClose, onSave }) {
     const months = member.durationDays ? Math.max(1, Math.round(member.durationDays / 30)) : 1;
     return {
       name: member.name, gender: member.gender, dob: member.dob || '2000-01-01', phone: member.phone || '',
+      bloodType: member.bloodType || '',
       category: categoryOf(member.sports), planId: null,
       months, monthlyPrice: Math.round((member.amountPaid || 0) / months) || 0,
       insurance: !!member.insurance, rfidUid: member.rfidUid || '', photo: undefined,
@@ -515,7 +519,7 @@ function MemberForm({ member, onClose, onSave }) {
       : (member && member.sessionsTotal != null ? member.sessionsLeft : sessionsTotal);
     onSave({
       id: member?.id,                       // undefined ⇒ the API creates it
-      name: f.name, gender: f.gender, dob: f.dob, phone: f.phone,
+      name: f.name, gender: f.gender, dob: f.dob, phone: f.phone, bloodType: f.bloodType || null,
       rfidUid: f.rfidUid || undefined,      // undefined ⇒ the API assigns one
       sports: category.sports,
       membershipType: 'subscription',
@@ -548,6 +552,9 @@ function MemberForm({ member, onClose, onSave }) {
                 options={[['M', t('Male')], ['F', t('Female')]]} /></div>
             <div className="field"><label>{t('Phone')}</label>
               <input value={f.phone} onChange={(e) => set('phone', e.target.value)} placeholder={t('05xx xx xx xx')} /></div>
+            <div className="field"><label>{t('Blood type')}</label>
+              <Select value={f.bloodType} onChange={(v) => set('bloodType', v)} ariaLabel={t('Blood type')}
+                options={BLOOD_TYPES.map((b) => [b, b])} /></div>
             <PhotoField member={member} value={f.photo} onChange={(v) => set('photo', v)} />
             <div className="field full"><label>{t('Membership category')}</label>
               <div className="chip-row">

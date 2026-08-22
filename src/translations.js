@@ -236,6 +236,7 @@ export const FR = {
   "Remaining": "Restant",
   "Ends": "Fin",
   "Gender": "Sexe",
+  "Blood type": "Groupe sanguin",
   "Paid": "Payé",
   "No members match these filters. Clear a filter or register a new member.": "Aucun membre ne correspond à ces filtres. Effacez un filtre ou enregistrez un nouveau membre.",
   "Delete ": "Supprimer ",

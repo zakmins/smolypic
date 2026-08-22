@@ -28,7 +28,9 @@ export async function api(path, { method = 'GET', body } = {}) {
 
   const res = await window.smolympic.api({ method, path, body, token: authToken });
 
-  if (res.status === 401) {
+  // /login's own 401s are credential errors, not an expired session — let their
+  // specific message (below) through instead of the generic session-expired one.
+  if (res.status === 401 && path !== '/login') {
     setAuthToken(null);
     if (onUnauthorized) onUnauthorized();
     throw new Error('Your session has expired — please sign in again.');
