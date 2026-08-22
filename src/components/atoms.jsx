@@ -23,9 +23,8 @@ export const SportBadge = ({ sport }) => (
   <span className={`badge ${sport.toLowerCase()}`}>{sport}</span>
 );
 
-export function MembershipBadge({ member }) {
+export function MembershipBadge() {
   const t = useT();
-  if (member.membershipType === 'session') return <span className="badge amber">{t('Session')}</span>;
   return <span className="badge green">{t('Subscribed')}</span>;
 }
 

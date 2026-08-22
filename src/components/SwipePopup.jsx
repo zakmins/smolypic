@@ -43,9 +43,7 @@ export default function SwipePopup({ event, queued, onDismiss }) {
 
   const status = memberStatus(member);
   const days = daysRemaining(member);
-  const isSession = member.membershipType === 'session';
   const expired = status === 'expired';
-  const owed = isSession && member.sessionsLeft < 0;
   const entering = kind === 'in';
 
   return (
@@ -67,35 +65,24 @@ export default function SwipePopup({ event, queued, onDismiss }) {
             <div className="swipe-rows">
               <div>
                 <span className="k">{t('Membership')}</span>
-                <span className="v">{isSession ? t('Pay-per-session') : t('Subscription')}</span>
+                <span className="v">{t('Subscription')}</span>
               </div>
-              {isSession ? (
-                <div>
-                  <span className="k">{t('Sessions left')}</span>
-                  <span className="v mono" style={{ color: member.sessionsLeft > 0 ? 'var(--green)' : 'var(--red)' }}>
-                    {member.sessionsLeft}{owed ? t('  (club owes {n})', { n: Math.abs(member.sessionsLeft) }) : ''}
-                  </span>
-                </div>
-              ) : (
-                <>
-                  <div>
-                    <span className="k">{t('Subscription ends')}</span>
-                    <span className="v mono" style={{ color: expired ? 'var(--red)' : 'var(--text)' }}>{fmtDate(member.subEnd)}</span>
-                  </div>
-                  <div>
-                    <span className="k">{t('Days remaining')}</span>
-                    <span className="v mono" style={{ color: expired ? 'var(--red)' : 'var(--green)' }}>
-                      {days > 0 ? t('{days} days', { days }) : (Math.abs(days) === 1 ? t('expired {n} day ago', { n: Math.abs(days) }) : t('expired {n} days ago', { n: Math.abs(days) }))}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="k">{t('Sessions')}</span>
-                    {isUnlimitedSub(member)
-                      ? <span className="v">{t('Unlimited')}</span>
-                      : <span className="v mono" style={{ color: member.sessionsLeft > 0 ? 'var(--green)' : 'var(--red)' }}>{t('{n} left', { n: member.sessionsLeft })}</span>}
-                  </div>
-                </>
-              )}
+              <div>
+                <span className="k">{t('Subscription ends')}</span>
+                <span className="v mono" style={{ color: expired ? 'var(--red)' : 'var(--text)' }}>{fmtDate(member.subEnd)}</span>
+              </div>
+              <div>
+                <span className="k">{t('Days remaining')}</span>
+                <span className="v mono" style={{ color: expired ? 'var(--red)' : 'var(--green)' }}>
+                  {days > 0 ? t('{days} days', { days }) : (Math.abs(days) === 1 ? t('expired {n} day ago', { n: Math.abs(days) }) : t('expired {n} days ago', { n: Math.abs(days) }))}
+                </span>
+              </div>
+              <div>
+                <span className="k">{t('Sessions')}</span>
+                {isUnlimitedSub(member)
+                  ? <span className="v">{t('Unlimited')}</span>
+                  : <span className="v mono" style={{ color: member.sessionsLeft > 0 ? 'var(--green)' : 'var(--red)' }}>{t('{n} left', { n: member.sessionsLeft })}</span>}
+              </div>
               <div><span className="k">{t('Last visit')}</span><span className="v">{fmtDate(member.lastVisit)}</span></div>
               {!entering && (
                 <div><span className="k">{t('Stay duration')}</span><span className="v mono">{durationLabel(event.at - event.entryTime)}</span></div>
@@ -106,12 +93,10 @@ export default function SwipePopup({ event, queued, onDismiss }) {
         {expired && (
           <div className="swipe-warning">
             <Icons.warn width="18" height="18" />
-            {isSession
-              ? (owed ? t('OUT OF SESSIONS — club owes {n}, collect payment', { n: Math.abs(member.sessionsLeft) }) : t('NO SESSIONS LEFT — contact staff'))
-              : t('SUBSCRIPTION EXPIRED — contact staff')}
+            {t('SUBSCRIPTION EXPIRED — contact staff')}
           </div>
         )}
-        {!expired && !isSession && days <= 7 && (
+        {!expired && days <= 7 && (
           <div className="swipe-warning amber">
             <Icons.warn width="18" height="18" /> {days === 1 ? t('Subscription ends in {days} day', { days }) : t('Subscription ends in {days} days', { days })}
           </div>

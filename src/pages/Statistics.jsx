@@ -1,11 +1,10 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { AppCtx } from '../App.jsx';
-import { Avatar, SportBadge, MembershipBadge, Icons } from '../components/atoms.jsx';
+import { Avatar } from '../components/atoms.jsx';
 import { LineChart, BarChart, Donut, Heatmap } from '../charts/Charts.jsx';
-import { dzd, fmtDate, dayKey, memberStatus } from '../utils.js';
+import { dzd, dayKey, memberStatus } from '../utils.js';
 import { api } from '../api.js';
 import { useT } from '../i18n.jsx';
-import Portal from '../components/Portal.jsx';
 import DatePicker from '../components/DatePicker.jsx';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -52,10 +51,9 @@ function PanelLoading() {
 
 export default function Statistics() {
   const t = useT();
-  const { members, setRoute, setFocusMemberId } = useContext(AppCtx);
+  const { members } = useContext(AppCtx);
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
-  const [kpiModal, setKpiModal] = useState(null);   // 'active' | 'inactive' | null
   const [revGran, setRevGran] = useState('months'); // revenue trend granularity: 'days' | 'weeks' | 'months'
 
   // Filterable panels — each carries its own before/after window. Defaults mirror
@@ -71,17 +69,6 @@ export default function Statistics() {
     api('/stats').then(setStats).catch((e) => setError(e.message));
   }, []);
   useEffect(() => { load(); }, [load]);
-
-  // Esc closes the KPI drill-down modal.
-  useEffect(() => {
-    if (!kpiModal) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') setKpiModal(null); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [kpiModal]);
-
-  // Open a member's profile drawer from a KPI list (mirrors Live status).
-  const goToMember = (id) => { setFocusMemberId(id); setRoute('customers'); setKpiModal(null); };
 
   if (!stats) {
     return (
@@ -151,19 +138,13 @@ export default function Statistics() {
           <div className="v mono">{dzd(MONTH_REVENUE)}</div>
           <div className="sub">{MONTH_LABEL}</div>
         </div>
-        <div className="stat-card clickable" role="button" tabIndex={0}
-          onClick={() => setKpiModal('active')}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setKpiModal('active'); } }}>
-          <Icons.arrow className="kpi-arrow" width="18" height="18" />
+        <div className="stat-card">
           <div className="k">{t('Active members')}</div>
           <div className="v" style={{ color: 'var(--green)' }}>{ACTIVE.length}</div>
           <div className="sub">{t('with a valid membership')}</div>
         </div>
-        <div className="stat-card clickable" role="button" tabIndex={0}
-          onClick={() => setKpiModal('inactive')}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setKpiModal('inactive'); } }}>
-          <Icons.arrow className="kpi-arrow" width="18" height="18" />
-          <div className="k">{t('Inactive 30+ days')}</div>
+        <div className="stat-card">
+          <div className="k">{t('Inactive 90+ days')}</div>
           <div className="v" style={{ color: INACTIVE.length ? 'var(--amber)' : 'var(--green)' }}>{INACTIVE.length}</div>
           <div className="sub">{t('worth a phone call this week')}</div>
         </div>
@@ -280,51 +261,6 @@ export default function Statistics() {
           </div>
         </div>
       </div>
-
-      {kpiModal && (() => {
-        const views = {
-          active: { title: t('Active members'), items: ACTIVE, tone: 'green' },
-          inactive: { title: t('Inactive 30+ days'), items: INACTIVE, tone: 'amber' },
-        };
-        const view = views[kpiModal];
-        return (
-          <Portal>
-          <div className="modal-center" onClick={() => setKpiModal(null)}>
-            <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={view.title}>
-              <div className="modal-head">
-                <div className="modal-title">{view.title}</div>
-                <span className="panel-sub" style={{ marginLeft: 12 }}>{t('{n} total', { n: view.items.length })}</span>
-                <button className="x-btn" onClick={() => setKpiModal(null)} aria-label={t('Close')}>×</button>
-              </div>
-              <div className="modal-body kpi-list" style={{ padding: 0 }}>
-                {view.items.length === 0 ? (
-                  <div className="empty-state" style={{ padding: '28px 0' }}>
-                    {kpiModal === 'inactive' ? t('Everyone has trained recently.') : t('Nothing to show here.')}
-                  </div>
-                ) : view.items.map((m) => (
-                  <div key={m.id} className="live-row" role="button" tabIndex={0}
-                    title={t("Open {name}'s profile", { name: m.name })}
-                    onClick={() => goToMember(m.id)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goToMember(m.id); } }}>
-                    <Avatar member={m} />
-                    <div style={{ minWidth: 0 }}>
-                      <div className="live-name">{m.name}</div>
-                      <div className="live-meta">
-                        {m.sports.map((s) => <SportBadge key={s} sport={s} />)}
-                        <MembershipBadge member={m} />
-                      </div>
-                    </div>
-                    <div style={{ marginLeft: 'auto', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: `var(--${view.tone})` }}>
-                      {t('last seen {date}', { date: fmtDate(m.lastVisit) })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          </Portal>
-        );
-      })()}
     </>
   );
 }

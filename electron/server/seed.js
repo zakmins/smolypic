@@ -96,7 +96,7 @@ function seed(db) {
     const meteredLowIdx = new Set([17, 25]);            // METERED subs with 1 session left (sessions axis)
     const meteredIdx = new Set([3, 8, 14, 20, 27]);     // healthy METERED subs
     const expiredIdx = new Set([5, 13, 21, 29]);        // subscription already over (by date)
-    const owedIdx = new Set([6, 22]);                   // pay-per-session, club owes sessions
+    const owedIdx = new Set([6, 22]);                   // metered subscription, club owes sessions (negative left)
     const balanceIdx = new Map([[3, 1500], [11, 3000], [27, 800]]);   // paid only a deposit ⇒ owes the rest
     const insertMember = db.prepare(
       `INSERT INTO members (rfid_uid,name,gender,dob,phone,sports,membership_type,
@@ -112,43 +112,31 @@ function seed(db) {
       } while (usedNames.has(name));
       usedNames.add(name);
 
-      // Session-metered / pay-per-session demos must be Gym/Cardio — Judo & Wrestling
-      // are monthly-only with no session count; everyone else gets a real category.
+      // Session-metered demos must be Gym/Cardio — Judo & Wrestling are monthly-only
+      // with no session count; everyone else gets a real category.
       const needsSessions = owedIdx.has(i) || meteredLowIdx.has(i) || meteredIdx.has(i);
       const sports = needsSessions ? R.choice([['GYM'], ['GYM', 'CARDIO'], ['CARDIO']]) : pickSports();
       const gymFamily = sports.includes('GYM') || sports.includes('CARDIO');
-      let mtype;
-      if (owedIdx.has(i)) mtype = 'session';
-      else if (expiringIdx.has(i) || meteredLowIdx.has(i) || meteredIdx.has(i) || expiredIdx.has(i)) mtype = 'subscription';
-      else if (!gymFamily) mtype = 'subscription';   // Judo/Wrestling: monthly subscription only
-      else mtype = R.random() < 0.6 ? 'subscription' : 'session';
       // Only Gym/Cardio subscriptions can be metered (a 2/3/4-per-week plan ⇒ 8/12/16).
-      const metered = meteredLowIdx.has(i) || meteredIdx.has(i)
-        || (mtype === 'subscription' && gymFamily && !expiringIdx.has(i) && R.random() < 0.35);
+      const metered = owedIdx.has(i) || meteredLowIdx.has(i) || meteredIdx.has(i)
+        || (gymFamily && !expiringIdx.has(i) && R.random() < 0.35);
       const join = addDays(NOW, -R.randint(20, 420));
       const dur = R.choice([30, 30, 90, 90, 180, 365]);
 
       let subStart, subEnd, sessionsTotal = null, sessionsLeft = null;
-      if (mtype === 'subscription') {
-        if (expiringIdx.has(i)) {
-          subEnd = addDays(NOW, 1);                       // lapses tomorrow ⇒ days_remaining 1 (< 2)
-          subStart = addDays(subEnd, -dur);
-        } else if (expiredIdx.has(i)) {
-          subEnd = addDays(NOW, -R.randint(1, 18));
-          subStart = addDays(subEnd, -dur);
-        } else {
-          subStart = addDays(NOW, -R.randint(0, dur - 3));
-          subEnd = addDays(subStart, dur);
-        }
-        if (metered) {
-          sessionsTotal = R.choice([8, 12, 16]);
-          sessionsLeft = meteredLowIdx.has(i) ? 1 : R.randint(2, sessionsTotal);
-        }
+      if (expiringIdx.has(i)) {
+        subEnd = addDays(NOW, 1);                       // lapses tomorrow ⇒ days_remaining 1 (< 2)
+        subStart = addDays(subEnd, -dur);
+      } else if (expiredIdx.has(i)) {
+        subEnd = addDays(NOW, -R.randint(1, 18));
+        subStart = addDays(subEnd, -dur);
       } else {
-        subStart = join;
-        subEnd = addDays(join, 3650);                   // session packs don't expire
-        sessionsTotal = R.choice([10, 12, 20]);
-        sessionsLeft = owedIdx.has(i) ? R.choice([-1, -2]) : R.randint(0, sessionsTotal);
+        subStart = addDays(NOW, -R.randint(0, dur - 3));
+        subEnd = addDays(subStart, dur);
+      }
+      if (metered) {
+        sessionsTotal = R.choice([8, 12, 16]);
+        sessionsLeft = owedIdx.has(i) ? R.choice([-1, -2]) : meteredLowIdx.has(i) ? 1 : R.randint(2, sessionsTotal);
       }
 
       const insured = R.random() < 0.62;
@@ -158,7 +146,7 @@ function seed(db) {
         String(4200000000 + i * 13), name, gender,    // 10-digit numeric tag UID
         `${NOW.getFullYear() - R.randint(16, 47)}-${pad(R.randint(1, 12))}-${pad(R.randint(1, 28))}`,
         `05${R.randint(40, 99)} ${R.randint(10, 99)} ${R.randint(10, 99)} ${R.randint(10, 99)}`,
-        JSON.stringify(sports), mtype,
+        JSON.stringify(sports), 'subscription',
         isoDate(subStart), isoDate(subEnd), dur, sessionsTotal, sessionsLeft,
         insured ? 1 : 0, insExpiry, R.randint(0, 359), iso(join),
       );
@@ -219,8 +207,6 @@ function seed(db) {
     const lapsedIds = new Set([...lapsedIdx].filter((i) => i < memberIds.length).map((i) => memberIds[i]));
     for (const m of members) {
       const perWeek = R.uniform(1.2, 4.8);
-      const sports = JSON.parse(m.sports);
-      const sessionPrice = m.membership_type === 'session' ? (sports.includes('CARDIO') ? 400 : 300) : null;
       const stop = lapsedIds.has(m.id) ? addDays(NOW, -R.randint(35, 80)) : NOW;
       let day = new Date(Math.max(new Date(m.join_date).getTime(), addDays(NOW, -150).getTime()));
       while (atMidnight(day) < atMidnight(stop)) {
@@ -229,7 +215,6 @@ function seed(db) {
           start.setHours(visitHour(), R.randint(0, 59), R.randint(0, 59), 0);
           const end = new Date(start.getTime() + R.randint(35, 130) * 60000);
           insertEntry.run(m.id, iso(start), iso(end));
-          if (sessionPrice) insertPayment.run(m.id, sessionPrice, 'session', sports[0], 'Cash', iso(start));
         }
         day = addDays(day, 1);
       }
@@ -252,11 +237,6 @@ function seed(db) {
         const end = new Date(Math.min(start.getTime() + R.randint(35, 125) * 60000,
           NOW.getTime() - R.randint(2, 30) * 60000));
         if (end > start) insertEntry.run(mid, iso(start), iso(end));
-      }
-      const row = db.prepare('SELECT * FROM members WHERE id=?').get(mid);
-      if (row.membership_type === 'session') {
-        const sports = JSON.parse(row.sports);
-        insertPayment.run(mid, sports.includes('CARDIO') ? 400 : 300, 'session', sports[0], 'Cash', iso(start));
       }
     }
 

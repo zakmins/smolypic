@@ -24,18 +24,15 @@ export const daysRemaining = (m) => {
 
 // A subscription is either UNLIMITED (date-window only) or METERED (date + a
 // session quota). The quota is encoded in sessionsTotal/sessionsLeft:
-//   NULL ⇒ unlimited, a number ⇒ metered. Pay-per-session is its own type.
+//   NULL ⇒ unlimited, a number ⇒ metered.
 export const isSubscription = (m) => m.membershipType === 'subscription';
 export const isUnlimitedSub = (m) => isSubscription(m) && m.sessionsTotal == null;
 export const isMeteredSub = (m) => isSubscription(m) && m.sessionsTotal != null;
-// Members whose entries burn a session: pay-per-session or metered subs.
-export const usesSessionQuota = (m) => m.membershipType === 'session' || isMeteredSub(m);
+// Members whose entries burn a session: metered subs.
+export const usesSessionQuota = isMeteredSub;
 
 export const memberStatus = (m) => {
-  if (m.membershipType === 'session') {
-    return m.sessionsLeft > 0 ? 'session' : 'expired';
-  }
-  // Subscription: expires on date; metered subs also expire when sessions run out.
+  // Expires on date; metered subs also expire when sessions run out.
   const dateOk = daysRemaining(m) > 0;
   const sessionsOk = m.sessionsTotal == null || m.sessionsLeft > 0;
   return dateOk && sessionsOk ? 'active' : 'expired';

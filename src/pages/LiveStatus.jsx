@@ -79,8 +79,7 @@ export default function LiveStatus() {
     const { member, entryTime } = row;
     const status = memberStatus(member);
     const expired = status === 'expired';
-    const isSession = member.membershipType === 'session';
-    const usesSessions = usesSessionQuota(member);   // pay-per-session or metered sub
+    const usesSessions = usesSessionQuota(member);   // metered sub
     const days = daysRemaining(member);
     return (
       <div key={`m-${member.id}`} className={`live-row ${expired ? 'expired' : ''}`}
@@ -97,7 +96,7 @@ export default function LiveStatus() {
           </div>
         </div>
         <div>
-          <div className="live-timer" style={{ color: expired ? 'var(--red)' : isSession ? 'var(--amber)' : 'var(--green)' }}>
+          <div className="live-timer" style={{ color: expired ? 'var(--red)' : 'var(--green)' }}>
             {hhmmss(now - entryTime)}
           </div>
           <div className={`live-remaining ${expired ? 'warn' : ''}`}>

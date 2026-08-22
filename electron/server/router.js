@@ -352,14 +352,7 @@ function swipe(db, { body }) {
       event = { kind: 'out', entryTime: ms(open.entry_time), at: now.getTime() };
     } else {
       db.prepare('INSERT INTO entries (member_id,entry_time,exit_time) VALUES (?,?,NULL)').run(m.id, iso(now));
-      if (m.membership_type === 'session') {
-        // Pay-per-session: burn a session and bill it (may go negative ⇒ club owes).
-        db.prepare('UPDATE members SET sessions_left=sessions_left-1 WHERE id=?').run(m.id);
-        const sports = JSON.parse(m.sports);
-        const price = sessionPriceFor(getPricing(db));
-        db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
-          .run(m.id, price, 'session', sports[0], 'Cash', iso(now));
-      } else if (m.membership_type === 'subscription' && m.sessions_total != null) {
+      if (m.membership_type === 'subscription' && m.sessions_total != null) {
         // Metered subscription: burn a session from the quota (already paid, no charge).
         // Unlimited subscriptions (sessions_total NULL) never decrement.
         db.prepare('UPDATE members SET sessions_left=sessions_left-1 WHERE id=?').run(m.id);
@@ -445,10 +438,8 @@ function createMember(db, { body, user }) {
     do { rfid = String(4200000000 + n * 13); n += 1; }
     while (db.prepare('SELECT 1 FROM members WHERE rfid_uid=?').get(rfid));
   }
-  const isSession = body.membershipType === 'session';
   const sports = body.sports || ['GYM'];
-  // sessions_total/left carry the quota: NULL ⇒ unlimited sub (or membership without
-  // sessions), a number ⇒ metered sub / pay-per-session pack.
+  // sessions_total/left carry the quota: NULL ⇒ unlimited sub, a number ⇒ metered sub.
   const sessionsTotal = body.sessionsTotal ?? null;
   const sessionsLeft = body.sessionsLeft != null ? body.sessionsLeft : sessionsTotal;
   // Insurance is a 500 DZD/year fee: enrolling sets a one-year expiry + a payment.
@@ -471,15 +462,14 @@ function createMember(db, { body, user }) {
   );
   if (amount) {
     db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
-      .run(info.lastInsertRowid, amount, isSession ? 'session' : 'subscription', sports[0], 'Cash', iso(now));
+      .run(info.lastInsertRowid, amount, 'subscription', sports[0], 'Cash', iso(now));
   }
   if (body.insurance) {
     db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
       .run(info.lastInsertRowid, getPricing(db).insurance, 'insurance', null, 'Cash', iso(now));
   }
   if (body.photo) setMemberPhoto(db, info.lastInsertRowid, body.photo);   // optional portrait
-  const plan = isSession ? `${sessionsTotal} sessions`
-    : (sessionsTotal != null ? `metered ${body.durationDays ?? 30}d / ${sessionsTotal} sessions` : `unlimited ${body.durationDays ?? 30}d`);
+  const plan = sessionsTotal != null ? `metered ${body.durationDays ?? 30}d / ${sessionsTotal} sessions` : `unlimited ${body.durationDays ?? 30}d`;
   logActivity(db, user.id, 'member.create', body.name,
     `Registered member ${body.name} — ${sports.join(', ')}, ${plan}`
     + (amount ? ` (${amount} DZD)` : '') + (balance ? ` — balance due ${balance} DZD` : ''));
@@ -569,8 +559,10 @@ function renewMember(db, { params, body, user }) {
   const parts = [];
   if (body.days) {
     const base = Math.max(now.getTime(), ms(m.sub_end));
-    db.prepare('UPDATE members SET sub_end=?, duration_days=? WHERE id=?')
-      .run(isoDate(new Date(base + body.days * 86400000)), body.days, id);
+    // sub_start moves to the same anchor: it should read as "start of the
+    // current paid period," not freeze at the member's very first subscription.
+    db.prepare('UPDATE members SET sub_start=?, sub_end=?, duration_days=? WHERE id=?')
+      .run(isoDate(new Date(base)), isoDate(new Date(base + body.days * 86400000)), body.days, id);
     parts.push(`+${body.days} days`);
   }
   if (body.applyPlan) {
@@ -784,7 +776,7 @@ function stats(db) {
     .filter(Boolean);
   const owed = members.filter(isOwed);
 
-  const inactive = members.filter((m) => (now.getTime() - ms(m.lastVisit)) / 86400000 > 30);
+  const inactive = members.filter((m) => (now.getTime() - ms(m.lastVisit)) / 86400000 > 90);
 
   return {
     revenueDaily: { current: curDaily, previous: prevDaily },

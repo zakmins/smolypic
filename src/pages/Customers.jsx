@@ -6,7 +6,7 @@ import DatePicker from '../components/DatePicker.jsx';
 import { SPORTS, dzd, fmtDate, age, daysRemaining, memberStatus, fmtTime, durationLabel,
   isSubscription, isUnlimitedSub, usesSessionQuota, remainingLabel, pageList,
   insuranceStatus, insuranceDaysLeft, INSURANCE_PRICE,
-  defaultSessionPrice, subPlans } from '../utils.js';
+  subPlans } from '../utils.js';
 import { api } from '../api.js';
 import { useT } from '../i18n.jsx';
 import Portal from '../components/Portal.jsx';
@@ -21,6 +21,8 @@ const SORTS = {
 
 // Entry-history pager shows 5 visits per page (pageList lives in utils).
 const ENTRY_PAGE_SIZE = 5;
+// Members table pager.
+const MEMBERS_PAGE_SIZE = 50;
 
 export default function Customers() {
   const t = useT();
@@ -56,7 +58,6 @@ export default function Customers() {
         const s = memberStatus(m);
         if (status === 'active') return s === 'active';
         if (status === 'expired') return s === 'expired';
-        if (status === 'session') return m.membershipType === 'session';
         if (status === 'owing') return m.balance > 0;
         return true;
       })
@@ -65,6 +66,14 @@ export default function Customers() {
   }, [members, q, gender, sport, status, insurance, sort]);
 
   const sel = selected ? members.find((m) => m.id === selected) : null;
+
+  // Members table: fixed-size pages (mounting hundreds of <tr>s at once is what
+  // made the page feel like it "hung" for a moment after jumping here from a KPI
+  // modal) — each page still scrolls within itself if it overflows the panel.
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [q, gender, sport, status, insurance, sort]);   // any change ⇒ back to page 1
+  const totalPages = Math.max(1, Math.ceil(filtered.length / MEMBERS_PAGE_SIZE));
+  const pageRows = filtered.slice((page - 1) * MEMBERS_PAGE_SIZE, page * MEMBERS_PAGE_SIZE);
 
   return (
     <>
@@ -85,7 +94,7 @@ export default function Customers() {
         <Select value={sport} onChange={setSport} ariaLabel={t('Filter by sport')}
           options={[['all', t('All sports')], ...SPORTS.map((s) => [s, t(s[0] + s.slice(1).toLowerCase())])]} />
         <Select value={status} onChange={setStatus} ariaLabel={t('Filter by status')}
-          options={[['all', t('Any status')], ['active', t('Active')], ['expired', t('Expired')], ['session', t('Session-only')], ['owing', t('Owing balance')]]} />
+          options={[['all', t('Any status')], ['active', t('Active')], ['expired', t('Expired')], ['owing', t('Owing balance')]]} />
         <Select value={insurance} onChange={setInsurance} ariaLabel={t('Filter by insurance')}
           options={[['all', t('Insurance: any')], ['yes', t('Insured')], ['no', t('Not insured')]]} />
         <Select value={sort} onChange={setSort} ariaLabel={t('Sort')}
@@ -93,7 +102,7 @@ export default function Customers() {
       </div>
 
       <div className="panel" style={{ overflow: 'hidden' }}>
-        <div style={{ maxHeight: 'calc(100vh - 320px)', overflowY: 'auto' }}>
+        <div style={{ maxHeight: 'calc(100vh - 380px)', overflowY: 'auto' }}>
           <table className="table">
             <thead>
               <tr>
@@ -102,9 +111,8 @@ export default function Customers() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((m) => {
+              {pageRows.map((m) => {
                 const s = memberStatus(m);
-                const isSession = m.membershipType === 'session';
                 return (
                   <tr key={m.id} onClick={() => setSelected(m.id)}>
                     <td style={{ width: 50 }}><Avatar member={m} /></td>
@@ -114,7 +122,7 @@ export default function Customers() {
                     <td className="mono num" style={{ color: s === 'expired' ? 'var(--red)' : 'var(--text)' }}>
                       {remainingLabel(m)}
                     </td>
-                    <td className="mono">{isSession ? '—' : fmtDate(m.subEnd)}</td>
+                    <td className="mono">{fmtDate(m.subEnd)}</td>
                     <td>{m.gender === 'M' ? t('Male') : t('Female')}</td>
                     <td>{m.insurance ? <span className="badge green">✓</span> : <span className="badge neutral">✗</span>}</td>
                     <td className="mono num">
@@ -132,6 +140,19 @@ export default function Customers() {
             </tbody>
           </table>
         </div>
+        {totalPages > 1 && (
+          <div className="pager" style={{ padding: '12px 14px', margin: 0 }}>
+            <button className="pager-btn" disabled={page === 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))} aria-label={t('Previous page')}>‹ {t('Prev')}</button>
+            {pageList(page, totalPages).map((p, idx) => (p === '…'
+              ? <span key={`gap-${idx}`} className="pager-gap">…</span>
+              : <button key={p} className={`pager-btn ${p === page ? 'on' : ''}`}
+                  aria-current={p === page ? 'page' : undefined} onClick={() => setPage(p)}>{p}</button>
+            ))}
+            <button className="pager-btn" disabled={page === totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))} aria-label={t('Next page')}>{t('Next')} ›</button>
+          </div>
+        )}
       </div>
 
       {sel && (
@@ -180,10 +201,9 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
   const t = useT();
   const { pricing } = useContext(AppCtx);
   const insurancePrice = pricing?.insurance ?? INSURANCE_PRICE;
-  const isSession = m.membershipType === 'session';
   const ins = insuranceStatus(m);
   const days = daysRemaining(m);
-  const usesSessions = usesSessionQuota(m);   // pay-per-session or metered sub
+  const usesSessions = usesSessionQuota(m);   // metered sub
   const pct = usesSessions
     ? Math.max(0, Math.min(100, (m.sessionsLeft / m.sessionsTotal) * 100))
     : Math.max(0, Math.min(100, (days / m.durationDays) * 100));
@@ -242,12 +262,12 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
           </div>
 
           <div className="kv">
-            <span className="k">{t('Date of birth')}</span><span className="v">{fmtDate(m.dob)} · {t('{n} yrs', { n: age(m.dob) })}</span>
+            <span className="k">{t('Date of birth')}</span><span className="v">{m.dob ? `${fmtDate(m.dob)} · ${t('{n} yrs', { n: age(m.dob) })}` : '—'}</span>
             <span className="k">{t('Phone')}</span><span className="v mono">{m.phone}</span>
             <span className="k">{t('Gender')}</span><span className="v">{m.gender === 'M' ? t('Male') : t('Female')}</span>
             {m.bloodType && <><span className="k">{t('Blood type')}</span><span className="v">{m.bloodType}</span></>}
             <span className="k">{t('RFID tag')}</span><span className="v mono">{m.rfidUid}</span>
-            {!isSession && <><span className="k">{t('Subscription')}</span><span className="v">{fmtDate(m.subStart)} → {fmtDate(m.subEnd)}</span></>}
+            <span className="k">{t('Subscription')}</span><span className="v">{fmtDate(m.subStart)} → {fmtDate(m.subEnd)}</span>
             {isSubscription(m) && <><span className="k">{t('Access')}</span><span className="v">{isUnlimitedSub(m) ? t('Unlimited') : t('Metered — {left} / {total} sessions', { left: m.sessionsLeft, total: m.sessionsTotal })}</span></>}
             <span className="k">{t('Amount paid')}</span><span className="v mono">{dzd(m.amountPaid)}</span>
             {m.balance > 0 && <><span className="k">{t('Balance due')}</span><span className="v mono" style={{ color: 'var(--red)', fontWeight: 700 }}>{dzd(m.balance)}</span></>}
@@ -616,54 +636,45 @@ function MemberForm({ member, onClose, onSave }) {
 function RenewForm({ member: m, onClose, onSave }) {
   const t = useT();
   const { pricing } = useContext(AppCtx);
-  const isSession = m.membershipType === 'session';
   const category = categoryOf(m.sports);
   const [months, setMonths] = useState(1);
   const [planId, setPlanId] = useState(null);
-  const [sessions, setSessions] = useState(10);
   const [amount, setAmount] = useState(2500);
   // Partial payment: null ⇒ pay the full fee; a number ⇒ a deposit, the rest is
   // added to the member's balance. Tracks the total until manually changed.
   const [paidNow, setPaidNow] = useState(null);
-  const sessionPrice = defaultSessionPrice(pricing);
   const plans = subPlans(pricing, category);
   const selectedPlan = plans.find((p) => p.id === planId) || null;
   // Default the plan (match the member's current quota where possible) on load.
   useEffect(() => {
-    if (isSession || !pricing) return;
+    if (!pricing) return;
     const list = subPlans(pricing, category);
     if (!list.length) { setPlanId(null); return; }
     if (list.some((p) => p.id === planId)) return;
     const quota = monthlyQuotaOf(m);
     setPlanId((list.find((p) => p.sessions === quota) || list[0]).id);
-  }, [isSession, pricing, category]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pricing, category]);   // eslint-disable-line react-hooks/exhaustive-deps
   // Suggest the configured price for the chosen plan + period (still editable).
   useEffect(() => {
-    if (isSession || !selectedPlan) return;
+    if (!selectedPlan) return;
     setAmount(selectedPlan.price * Math.max(1, months));
-  }, [isSession, selectedPlan, months]);
+  }, [selectedPlan, months]);
 
   // The full fee for this renewal, the deposit collected now, and the shortfall.
-  const total = isSession ? sessions * sessionPrice : amount;
+  const total = amount;
   const paid = paidNow == null ? total : Math.min(total, Math.max(0, Number(paidNow) || 0));
   const balance = Math.max(0, total - paid);
   useEffect(() => { setPaidNow((p) => (p == null ? null : Math.min(p, total))); }, [total]);
 
   const submit = () => {
-    if (isSession) {
-      // Pay-per-session: buy a pack of sessions, no date.
-      onSave({ sessions, amount: paid, total, method: 'Cash' });
-    } else {
-      // Extend the date and apply the chosen plan for the renewed period. A plan
-      // with a session quota ⇒ metered (sessions × months); unlimited ⇒ no quota.
-      const mo = Math.max(1, months);
-      const perMonth = selectedPlan && selectedPlan.sessions != null ? selectedPlan.sessions : null;
-      const sessionsTotal = perMonth != null ? perMonth * mo : null;
-      onSave({ days: mo * 30, applyPlan: true, sessionsTotal, amount: paid, total, method: 'Cash' });
-    }
+    // Extend the date and apply the chosen plan for the renewed period. A plan
+    // with a session quota ⇒ metered (sessions × months); unlimited ⇒ no quota.
+    const mo = Math.max(1, months);
+    const perMonth = selectedPlan && selectedPlan.sessions != null ? selectedPlan.sessions : null;
+    const sessionsTotal = perMonth != null ? perMonth * mo : null;
+    onSave({ days: mo * 30, applyPlan: true, sessionsTotal, amount: paid, total, method: 'Cash' });
   };
 
-  // Shared deposit + balance fields (both pay-per-session packs and subscriptions).
   const payFields = (
     <>
       <div className="field"><label>{t('Amount paid now (DZD)')}</label>
@@ -684,32 +695,22 @@ function RenewForm({ member: m, onClose, onSave }) {
           <button className="x-btn" onClick={onClose} aria-label={t('Close')}>×</button>
         </div>
         <div className="modal-body">
-          {isSession ? (
-            <div className="form-grid">
-              <div className="field"><label>{t('Sessions to add')}</label>
-                <input type="number" min="1" value={sessions} onChange={(e) => setSessions(Number(e.target.value))} /></div>
-              <div className="field"><label>{t('Total')}</label>
-                <input disabled value={`${sessions * sessionPrice} DZD`} /></div>
-              {payFields}
-            </div>
-          ) : (
-            <div className="form-grid">
-              <div className="field"><label>{t('Months')}</label>
-                <input type="number" min="1" value={months} onChange={(e) => setMonths(Number(e.target.value))} /></div>
-              <div className="field"><label>{t('Amount (DZD)')}</label>
-                <input type="number" min="0" value={amount} onChange={(e) => setAmount(Number(e.target.value))} /></div>
-              {plans.length > 0 && (
-                <div className="field full"><label>{t('Subscription plan')}</label>
-                  <Select value={planId || ''} onChange={(v) => setPlanId(v)} ariaLabel={t('Subscription plan')}
-                    options={plans.map((p) => [p.id, planLabel(p, t)])} /></div>
-              )}
-              {payFields}
-            </div>
-          )}
+          <div className="form-grid">
+            <div className="field"><label>{t('Months')}</label>
+              <input type="number" min="1" value={months} onChange={(e) => setMonths(Number(e.target.value))} /></div>
+            <div className="field"><label>{t('Amount (DZD)')}</label>
+              <input type="number" min="0" value={amount} onChange={(e) => setAmount(Number(e.target.value))} /></div>
+            {plans.length > 0 && (
+              <div className="field full"><label>{t('Subscription plan')}</label>
+                <Select value={planId || ''} onChange={(v) => setPlanId(v)} ariaLabel={t('Subscription plan')}
+                  options={plans.map((p) => [p.id, planLabel(p, t)])} /></div>
+            )}
+            {payFields}
+          </div>
         </div>
         <div className="modal-foot">
           <button className="btn ghost" onClick={onClose}>{t('Cancel')}</button>
-          <button className="btn primary" onClick={submit}>{isSession ? t('Add sessions') : t('Extend subscription')}</button>
+          <button className="btn primary" onClick={submit}>{t('Extend subscription')}</button>
         </div>
       </div>
     </div>
