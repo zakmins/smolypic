@@ -94,14 +94,12 @@ export const INSURANCE_PRICE = 500;
 // server rule in electron/server/db.js (sessionPriceFor).
 export const defaultSessionPrice = (pricing) =>
   (pricing && pricing.sessions && pricing.sessions[0] ? pricing.sessions[0].price : 0);
-// Monthly subscription price for a membership category + weekly-plan tier.
-// Judo/Wrestling are flat monthly (the access tier is ignored).
-export const monthlySubPrice = (pricing, category, access) => {
-  const subs = pricing && pricing.subscriptions && pricing.subscriptions[category];
-  if (!subs) return 0;
-  if (subs.monthly != null) return subs.monthly;
-  return subs[access] != null ? subs[access] : (subs.unlimited ?? 0);
-};
+// Admin-defined subscription plans for a membership category. Each plan is
+// { id, label, sessions|null, price } (null sessions ⇒ unlimited). Empty when the
+// category has no plans configured yet.
+export const subPlans = (pricing, category) =>
+  (pricing && Array.isArray(pricing.subscriptions))
+    ? pricing.subscriptions.filter((p) => p.category === category) : [];
 export const insuranceStatus = (m) => {
   if (!m.insurance) return 'none';
   if (!m.insuranceExpiry) return 'active';                       // enrolled, legacy without an expiry

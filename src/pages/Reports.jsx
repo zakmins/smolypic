@@ -52,6 +52,8 @@ export default function MembersReports() {
 
   const s = data.sessions;
   const ins = data.insurance;
+  // Average one-off sessions per day over the fixed 30-day daily window.
+  const avgPerDay = s.daily.length ? s.daily.reduce((sum, d) => sum + d.count, 0) / s.daily.length : 0;
   const coverage = [
     { label: t('Insured'), value: ins.insuredCount, color: '#22C55E' },
     { label: t('Not insured'), value: ins.notInsuredCount, color: '#FF5468' },
@@ -81,9 +83,9 @@ export default function MembersReports() {
           <div className="sub">{t('{n} today', { n: s.countToday })}</div>
         </div>
         <div className="stat-card hoverable">
-          <div className="k">{t('Avg. session price')}</div>
-          <div className="v mono">{dzd(s.avgPrice)}</div>
-          <div className="sub">{t('per session, this year')}</div>
+          <div className="k">{t('Avg. sessions / day')}</div>
+          <div className="v">{avgPerDay.toFixed(1)}</div>
+          <div className="sub">{t('last 30 days')}</div>
         </div>
         <div className="stat-card violet hoverable">
           <div className="k">{t('Sessions this month')}</div>

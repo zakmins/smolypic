@@ -2,13 +2,53 @@ import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { AppCtx } from '../App.jsx';
 import { Avatar, SportBadge, MembershipBadge, Icons } from '../components/atoms.jsx';
 import { LineChart, BarChart, Donut, Heatmap } from '../charts/Charts.jsx';
-import { dzd, fmtDate, memberStatus } from '../utils.js';
+import { dzd, fmtDate, dayKey, memberStatus } from '../utils.js';
 import { api } from '../api.js';
 import { useT } from '../i18n.jsx';
 import Portal from '../components/Portal.jsx';
+import DatePicker from '../components/DatePicker.jsx';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = Array.from({ length: 15 }, (_, i) => `${String(i + 8).padStart(2, '0')}h`);
+
+const ymd = (d) => dayKey(d);                                  // Date → 'YYYY-MM-DD'
+const yearStartKey = () => ymd(new Date(new Date().getFullYear(), 0, 1));
+const daysAgoKey = (n) => ymd(new Date(Date.now() - n * 86400000));
+
+// Each filterable panel fetches its own dataset for its [from, to] window from
+// /stats/panel, refetching whenever a bound changes (empty bound = unbounded).
+function usePanelData(metric, initialFrom, initialTo) {
+  const [from, setFrom] = useState(initialFrom);
+  const [to, setTo] = useState(initialTo);
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    const qs = new URLSearchParams({ metric });
+    if (from) qs.set('after', from);
+    if (to) qs.set('before', to);
+    let alive = true;
+    setData(null);
+    api(`/stats/panel?${qs.toString()}`).then((r) => { if (alive) setData(r.data); }).catch(() => { if (alive) setData(null); });
+    return () => { alive = false; };
+  }, [metric, from, to]);
+  return { from, to, setFrom, setTo, data };
+}
+
+// Compact before/after date pickers pinned to the right of a panel title.
+function RangeFilter({ panel }) {
+  const t = useT();
+  return (
+    <div className="range-filter">
+      <DatePicker value={panel.from} onChange={panel.setFrom} placeholder={t('Start')} ariaLabel={t('Filter from date')} width={126} />
+      <span className="range-filter-sep" aria-hidden="true">→</span>
+      <DatePicker value={panel.to} onChange={panel.setTo} placeholder={t('End')} ariaLabel={t('Filter to date')} width={126} />
+    </div>
+  );
+}
+
+function PanelLoading() {
+  const t = useT();
+  return <div className="empty-state" style={{ padding: '28px 0' }}>{t('Loading…')}</div>;
+}
 
 export default function Statistics() {
   const t = useT();
@@ -17,6 +57,14 @@ export default function Statistics() {
   const [error, setError] = useState(null);
   const [kpiModal, setKpiModal] = useState(null);   // 'active' | 'inactive' | null
   const [revGran, setRevGran] = useState('months'); // revenue trend granularity: 'days' | 'weeks' | 'months'
+
+  // Filterable panels — each carries its own before/after window. Defaults mirror
+  // the windows these panels used before the filter (YTD / last 60 / last 30 days).
+  const revBySport = usePanelData('revenueBySport', yearStartKey(), ymd(new Date()));
+  const memberGrowth = usePanelData('memberGrowth', yearStartKey(), ymd(new Date()));
+  const activeBySport = usePanelData('activeBySport', yearStartKey(), ymd(new Date()));
+  const peakHours = usePanelData('heatmap', daysAgoKey(60), ymd(new Date()));
+  const topVisitors = usePanelData('topVisitors', daysAgoKey(30), ymd(new Date()));
 
   const load = useCallback(() => {
     setError(null);
@@ -69,10 +117,6 @@ export default function Statistics() {
     months: { sub: t('this year'), interval: 0, labels: REVENUE_MONTHLY.map((m) => m.month), data: REVENUE_MONTHLY.map((m) => m.value), tips: REVENUE_MONTHLY.map((m) => m.tip) },
   };
   const revTrend = revViews[revGran];
-  const REVENUE_BY_SPORT = stats.revenueBySport;
-  const MEMBER_GROWTH = stats.memberGrowth;
-  const HEATMAP = stats.heatmap;
-  const TOP_VISITORS = stats.topVisitors;
   const INACTIVE = stats.inactive;
   // Member revenue (subscriptions + sessions) collected in the current calendar
   // month — bucketed by month, so it naturally resets to 0 when a new month
@@ -83,13 +127,9 @@ export default function Statistics() {
   // Members with a still-valid membership (not expired / out of sessions).
   const ACTIVE = members.filter((m) => memberStatus(m) !== 'expired');
 
+  // YTD subscriptions/sessions split — feeds the Total Revenue KPI card.
   const split = stats.revenueSplit;
   const splitTotal = split.subscriptions + split.sessions || 1;
-  const sportTotal = REVENUE_BY_SPORT.reduce((s, d) => s + d.value, 0) || 1;
-  const activeBySport = ['GYM', 'JUDO', 'WRESTLING', 'CARDIO'].map((s) => ({
-    label: s[0] + s.slice(1, 4).toLowerCase(), value: members.filter((m) => m.sports.includes(s)).length,
-    color: `var(--${s === 'GYM' ? 'accent' : s.toLowerCase()})`,
-  }));
 
   return (
     <>
@@ -154,59 +194,89 @@ export default function Statistics() {
         </div>
 
         <div className="panel">
-          <div className="panel-head"><div className="panel-title">{t('Revenue by sport')}</div></div>
+          <div className="panel-head">
+            <div className="panel-title">{t('Revenue by sport')}</div>
+            <RangeFilter panel={revBySport} />
+          </div>
           <div className="panel-body" style={{ display: 'flex', gap: 22, alignItems: 'center' }}>
-            <Donut data={REVENUE_BY_SPORT} centerValue={`${Math.round(sportTotal / 1000)}k`} centerLabel={t('DZD YTD')} />
-            <div style={{ display: 'grid', gap: 10 }}>
-              {REVENUE_BY_SPORT.map((d) => (
-                <div key={d.label} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13 }}>
-                  <i style={{ width: 10, height: 10, borderRadius: 3, background: d.color, display: 'inline-block' }} />
-                  <span style={{ width: 96, whiteSpace: 'nowrap' }}>{d.label}</span>
-                  <span style={{ fontFamily: 'var(--mono)', color: 'var(--muted)', fontSize: 12 }}>{dzd(d.value)}</span>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{Math.round((d.value / sportTotal) * 100)}%</span>
-                </div>
-              ))}
-              <div style={{ borderTop: '1px solid var(--line)', paddingTop: 10, fontSize: 12.5, color: 'var(--muted)' }}>
-                {t('Subscriptions {a}% · Sessions {b}%', { a: Math.round((split.subscriptions / splitTotal) * 100), b: Math.round((split.sessions / splitTotal) * 100) })}
-              </div>
-            </div>
+            {revBySport.data ? (() => {
+              const bySport = revBySport.data.bySport;
+              const sTotal = bySport.reduce((s, d) => s + d.value, 0) || 1;
+              const splTot = (revBySport.data.subscriptions + revBySport.data.sessions) || 1;
+              return (
+                <>
+                  <Donut data={bySport} centerValue={`${Math.round(sTotal / 1000)}k`} centerLabel={t('DZD')} />
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {bySport.map((d) => (
+                      <div key={d.label} style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13 }}>
+                        <i style={{ width: 10, height: 10, borderRadius: 3, background: d.color, display: 'inline-block' }} />
+                        <span style={{ width: 96, whiteSpace: 'nowrap' }}>{d.label}</span>
+                        <span style={{ fontFamily: 'var(--mono)', color: 'var(--muted)', fontSize: 12 }}>{dzd(d.value)}</span>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{Math.round((d.value / sTotal) * 100)}%</span>
+                      </div>
+                    ))}
+                    <div style={{ borderTop: '1px solid var(--line)', paddingTop: 10, fontSize: 12.5, color: 'var(--muted)' }}>
+                      {t('Subscriptions {a}% · Sessions {b}%', { a: Math.round((revBySport.data.subscriptions / splTot) * 100), b: Math.round((revBySport.data.sessions / splTot) * 100) })}
+                    </div>
+                  </div>
+                </>
+              );
+            })() : <PanelLoading />}
           </div>
         </div>
 
         <div className="panel">
-          <div className="panel-head"><div className="panel-title">{t('Member growth')}</div><div className="panel-sub">{t('cumulative · {year}', { year: new Date().getFullYear() })}</div></div>
+          <div className="panel-head">
+            <div className="panel-title">{t('Member growth')}</div>
+            <RangeFilter panel={memberGrowth} />
+          </div>
           <div className="panel-body">
-            <LineChart labels={MEMBER_GROWTH.map((m) => m.month)} height={200} interval={0} series={[
-              { name: t('Total members'), data: MEMBER_GROWTH.map((m) => m.value), color: 'var(--green)', fill: true },
-            ]} />
+            {memberGrowth.data ? (
+              <LineChart labels={memberGrowth.data.map((m) => m.month)} height={200} interval={0} series={[
+                { name: t('Total members'), data: memberGrowth.data.map((m) => m.value), color: 'var(--green)', fill: true },
+              ]} />
+            ) : <PanelLoading />}
           </div>
         </div>
 
         <div className="panel">
-          <div className="panel-head"><div className="panel-title">{t('Active members by sport')}</div></div>
-          <div className="panel-body"><BarChart data={activeBySport} height={200} /></div>
+          <div className="panel-head">
+            <div className="panel-title">{t('Active members by sport')}</div>
+            <RangeFilter panel={activeBySport} />
+          </div>
+          <div className="panel-body">
+            {activeBySport.data ? <BarChart data={activeBySport.data} height={200} /> : <PanelLoading />}
+          </div>
         </div>
 
         <div className="panel" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div className="panel-head"><div className="panel-title">{t('Peak hours — entries by hour × day')}</div></div>
+          <div className="panel-head">
+            <div className="panel-title">{t('Peak hours — entries by hour × day')}</div>
+            <RangeFilter panel={peakHours} />
+          </div>
           <div className="panel-body" style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-            <Heatmap grid={HEATMAP} hours={HOURS} days={DAYS.map((d) => t(d))} />
+            {peakHours.data ? <Heatmap grid={peakHours.data} hours={HOURS} days={DAYS.map((d) => t(d))} /> : <PanelLoading />}
           </div>
         </div>
 
         <div className="panel">
-          <div className="panel-head"><div className="panel-title">{t('Most frequent visitors')}</div><div className="panel-sub">{t('last 30 days')}</div></div>
+          <div className="panel-head">
+            <div className="panel-title">{t('Most frequent visitors')}</div>
+            <RangeFilter panel={topVisitors} />
+          </div>
           <div className="panel-body">
-            {TOP_VISITORS.slice(0, 5).map((tv, i) => (
-              <div key={tv.member.id} className="leader-row">
-                <span className={`leader-rank ${i < 3 ? 'top' : ''}`}>{i + 1}</span>
-                <Avatar member={tv.member} size="sm" />
-                <span style={{ fontWeight: 600 }}>{tv.member.name}</span>
-                <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>
-                  {t('{visits} visits · avg {min} min', { visits: tv.visits, min: tv.avgMin })}
-                </span>
-              </div>
-            ))}
+            {!topVisitors.data ? <PanelLoading />
+              : topVisitors.data.length === 0 ? <div className="empty-state" style={{ padding: '28px 0' }}>{t('No visits in this range.')}</div>
+              : topVisitors.data.slice(0, 5).map((tv, i) => (
+                <div key={tv.member.id} className="leader-row">
+                  <span className={`leader-rank ${i < 3 ? 'top' : ''}`}>{i + 1}</span>
+                  <Avatar member={tv.member} size="sm" />
+                  <span style={{ fontWeight: 600 }}>{tv.member.name}</span>
+                  <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>
+                    {t('{visits} visits · avg {min} min', { visits: tv.visits, min: tv.avgMin })}
+                  </span>
+                </div>
+              ))}
           </div>
         </div>
       </div>

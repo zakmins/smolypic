@@ -171,6 +171,17 @@ function Dashboard() {
     }
   }, [showToast]);
 
+  // Manually close a member's open entry (they left without swiping out at the exit reader).
+  const forceExitMember = useCallback(async (memberId, name) => {
+    try {
+      const d = await api(`/members/${memberId}/force-exit`, { method: 'POST' });
+      setMembers(d.members); setPresence(d.presence); setExits(d.exits); setToday(d.today);
+      showToast('Marked as exited — {name}', { name });
+    } catch (e) {
+      showToast('Could not mark as exited: {msg}', { msg: e.message });
+    }
+  }, [showToast]);
+
   // Demo simulator — picks a random member (occasionally an unknown tag) and
   // *emulates a real reader*: it "types" the UID as a fast burst of AZERTY
   // keystrokes (CAPS LOCK off) ending in Enter, exactly like the HID hardware.
@@ -399,11 +410,11 @@ function Dashboard() {
   const ctx = useMemo(() => ({
     members, presence, exits, today, stock, stockLog, consumed, pricing,
     saveMember, renewMember, payInsurance, payBalance, deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing,
-    savePreferences, simulateSwipe, handleSwipe, addGuestSession, removeGuestSession, showToast,
+    savePreferences, simulateSwipe, handleSwipe, addGuestSession, removeGuestSession, forceExitMember, showToast,
     daysRemaining, memberStatus, setRoute, focusMemberId, setFocusMemberId,
   }), [members, presence, exits, today, stock, stockLog, consumed, pricing, saveMember, renewMember, payInsurance, payBalance,
        deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing, savePreferences, simulateSwipe, handleSwipe,
-       addGuestSession, removeGuestSession, showToast, focusMemberId]);
+       addGuestSession, removeGuestSession, forceExitMember, showToast, focusMemberId]);
 
   const pages = {
     live: LiveStatus, customers: Customers, judo: Judo, wrestling: Wrestling,

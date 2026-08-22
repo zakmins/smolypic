@@ -174,22 +174,31 @@ CREATE TABLE IF NOT EXISTS settings (
 //  · insurance      — yearly fee (DZD)
 //  · sessions       — named pay-per-session / walk-in prices (name + amount). The
 //                     first one is the default rate billed on a pay-per-session swipe.
-//  · subscriptions  — monthly subscription prices. Gym/Cardio carry one price per
-//                     weekly plan tier (2/3/4 per week + unlimited); Judo &
-//                     Wrestling are flat monthly. GYM_CARDIO is the gym+cardio combo.
+//  · subscriptions  — a flat, admin-managed list of monthly plans, each carrying
+//                     its own category (GYM / CARDIO / GYM_CARDIO / JUDO /
+//                     WRESTLING): { id, category, label, sessions|null, price }. A
+//                     null `sessions` means unlimited (no per-session metering).
+const SUB_CATS = ['GYM', 'CARDIO', 'GYM_CARDIO', 'JUDO', 'WRESTLING'];
+const LEGACY_TIER_SESSIONS = { 2: 8, 3: 12, 4: 16 };
+const WEEKLY_DEFAULTS = [
+  { label: '2× / week', sessions: 8, price: 2000 },
+  { label: '3× / week', sessions: 12, price: 2500 },
+  { label: '4× / week', sessions: 16, price: 3000 },
+  { label: 'Unlimited', sessions: null, price: 3500 },
+];
+const DEFAULT_SUBSCRIPTIONS = [
+  ...['GYM', 'CARDIO', 'GYM_CARDIO'].flatMap((cat) =>
+    WEEKLY_DEFAULTS.map((p, i) => ({ id: `${cat.toLowerCase()}-${i}`, category: cat, ...p }))),
+  { id: 'judo', category: 'JUDO', label: 'Monthly', sessions: null, price: 3000 },
+  { id: 'wrestling', category: 'WRESTLING', label: 'Monthly', sessions: null, price: 3000 },
+];
 const DEFAULT_PRICING = {
   insurance: 500,
   sessions: [
     { id: 'standard', label: 'Standard session', price: 300 },
     { id: 'cardio', label: 'Cardio session', price: 400 },
   ],
-  subscriptions: {
-    GYM: { 2: 2000, 3: 2500, 4: 3000, unlimited: 3500 },
-    CARDIO: { 2: 2000, 3: 2500, 4: 3000, unlimited: 3500 },
-    GYM_CARDIO: { 2: 2000, 3: 2500, 4: 3000, unlimited: 3500 },
-    JUDO: { monthly: 3000 },
-    WRESTLING: { monthly: 3000 },
-  },
+  subscriptions: DEFAULT_SUBSCRIPTIONS,
 };
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -203,7 +212,7 @@ const toMoney = (v, fallback = 0) => {
 function normalizePricing(input) {
   const base = clone(DEFAULT_PRICING);
   if (!input || typeof input !== 'object') return base;
-  const out = { insurance: toMoney(input.insurance, base.insurance), sessions: [], subscriptions: {} };
+  const out = { insurance: toMoney(input.insurance, base.insurance), sessions: [], subscriptions: [] };
   const sessions = Array.isArray(input.sessions) ? input.sessions : base.sessions;
   out.sessions = sessions
     .filter((s) => s && (s.label != null || s.price != null))
@@ -213,11 +222,44 @@ function normalizePricing(input) {
       price: toMoney(s.price, 0),
     }));
   if (!out.sessions.length) out.sessions = clone(base.sessions);
-  for (const [cat, def] of Object.entries(base.subscriptions)) {
-    const given = (input.subscriptions && input.subscriptions[cat]) || {};
-    out.subscriptions[cat] = {};
-    for (const tier of Object.keys(def)) out.subscriptions[cat][tier] = toMoney(given[tier], def[tier]);
+
+  // Subscriptions: a flat plan list. Accepts the current array shape and migrates
+  // both older shapes — the per-category list ({ GYM: [...] }) and the original
+  // per-tier object ({ GYM: { 2, 3, 4, unlimited, monthly } }) — on read.
+  const normPlan = (p, i) => {
+    const n = Math.round(Number(p && p.sessions));
+    return {
+      id: String((p && p.id) || `sub-${i}`),
+      category: SUB_CATS.includes(p && p.category) ? p.category : 'GYM',
+      label: String((p && p.label) || `Plan ${i + 1}`),
+      sessions: Number.isFinite(n) && n > 0 ? n : null,
+      price: toMoney(p && p.price, 0),
+    };
+  };
+  let rawPlans;
+  if (Array.isArray(input.subscriptions)) {
+    rawPlans = input.subscriptions;
+  } else if (input.subscriptions && typeof input.subscriptions === 'object') {
+    // Flatten a legacy category-keyed object into a flat list.
+    rawPlans = [];
+    for (const cat of SUB_CATS) {
+      const v = input.subscriptions[cat];
+      if (Array.isArray(v)) {
+        v.forEach((p) => rawPlans.push({ ...p, category: cat }));
+      } else if (v && typeof v === 'object') {
+        if (v.monthly != null) rawPlans.push({ id: `${cat}-monthly`, category: cat, label: 'Monthly', sessions: null, price: v.monthly });
+        ['2', '3', '4'].forEach((tier) => {
+          if (v[tier] != null) rawPlans.push({ id: `${cat}-${tier}`, category: cat, label: `${tier}× / week`, sessions: LEGACY_TIER_SESSIONS[tier], price: v[tier] });
+        });
+        if (v.unlimited != null) rawPlans.push({ id: `${cat}-unl`, category: cat, label: 'Unlimited', sessions: null, price: v.unlimited });
+      }
+    }
+  } else {
+    rawPlans = null;
   }
+  out.subscriptions = Array.isArray(rawPlans)
+    ? rawPlans.filter((p) => p && (p.label != null || p.price != null || p.sessions != null || p.category != null)).map(normPlan)
+    : clone(base.subscriptions);
   return out;
 }
 

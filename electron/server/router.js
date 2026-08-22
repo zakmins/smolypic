@@ -376,6 +376,24 @@ function swipe(db, { body }) {
   };
 }
 
+// Manually close a member's open entry, e.g. when they left without swiping
+// their tag at the exit reader. Behaves exactly like the "out" half of a real
+// swipe — same exit_time write, same effect on Recent Exits and stats.
+function forceExit(db, { params, user }) {
+  const id = Number(params[0]);
+  const m = getMember(db, id);
+  const open = db.prepare('SELECT * FROM entries WHERE member_id=? AND exit_time IS NULL').get(id);
+  if (!open) throw new HttpError(400, 'Member is not currently inside');
+  db.prepare('UPDATE entries SET exit_time=? WHERE id=?').run(iso(new Date()), open.id);
+  logActivity(db, user.id, 'member.force_exit', m.name, `Manually marked ${m.name} as exited`);
+  return {
+    members: allMembers(db),
+    presence: presenceList(db),
+    exits: exitsList(db),
+    today: todayStats(db),
+  };
+}
+
 function guestSession(db, { body, user }) {
   const now = new Date();
   const name = (body.name || '').trim() || 'Walk-in';
@@ -613,6 +631,33 @@ function memberEntries(db, { params, query }) {
   ).all(id, limit).map((r) => ({ entryTime: ms(r.entry_time), exitTime: ms(r.exit_time) }));
 }
 
+// Revenue-by-category presentation + mapping, shared by the Statistics YTD view
+// and the date-filtered dashboard panels. Subscriptions map to the member's
+// category; sessions / walk-ins roll up into "Gym sessions".
+const CAT_LABEL = {
+  GYM: 'Gym', GYM_CARDIO: 'Gym + Cardio', CARDIO: 'Cardio',
+  JUDO: 'Judo', WRESTLING: 'Wrestling', GYM_SESSIONS: 'Gym sessions',
+};
+// Deliberately well-separated hues so adjacent slices never read as "the same".
+const CAT_COLOR = {
+  GYM: '#22C55E', GYM_CARDIO: '#F59E0B', CARDIO: '#06B6D4',
+  JUDO: '#6366F1', WRESTLING: '#A855F7', GYM_SESSIONS: '#EF4444',
+};
+const CAT_ORDER = ['GYM', 'GYM_CARDIO', 'CARDIO', 'JUDO', 'WRESTLING', 'GYM_SESSIONS'];
+const catOf = (sportsJson) => {
+  let arr = [];
+  try { arr = JSON.parse(sportsJson) || []; } catch { arr = []; }
+  const s = new Set(arr);
+  if (s.has('JUDO')) return 'JUDO';
+  if (s.has('WRESTLING')) return 'WRESTLING';
+  if (s.has('GYM') && s.has('CARDIO')) return 'GYM_CARDIO';
+  if (s.has('CARDIO')) return 'CARDIO';
+  return 'GYM';
+};
+// Deleted members leave orphaned payments (m.sports NULL). Fall back to the sport
+// recorded on the payment so subscription revenue keeps its category.
+const sportCat = (sp) => (sp === 'JUDO' ? 'JUDO' : sp === 'WRESTLING' ? 'WRESTLING' : sp === 'CARDIO' ? 'CARDIO' : 'GYM');
+
 function stats(db) {
   const now = new Date();
   const yearStart = iso(new Date(now.getFullYear(), 0, 1, 0, 0, 0));
@@ -641,34 +686,9 @@ function stats(db) {
   monthlyRows.forEach((r) => { byMonth[r.m] = r.s; });
   const revenueMonthly = months.map((mo, i) => ({ month: mo, value: byMonth[i + 1] || 0, tip: `${now.getFullYear()}-${pad(i + 1)}` }));
 
-  // Revenue by membership category (YTD). Subscriptions split by the member's
-  // category (Gym / Gym + Cardio / Cardio / Judo / Wrestling); every pay-per-session
-  // and walk-in payment rolls up into "Gym sessions". Stock never touches payments.
-  const CAT_LABEL = {
-    GYM: 'Gym', GYM_CARDIO: 'Gym + Cardio', CARDIO: 'Cardio',
-    JUDO: 'Judo', WRESTLING: 'Wrestling', GYM_SESSIONS: 'Gym sessions',
-  };
-  // Deliberately well-separated hues so adjacent slices never read as "the same".
-  const CAT_COLOR = {
-    GYM: '#22C55E', GYM_CARDIO: '#F59E0B', CARDIO: '#06B6D4',
-    JUDO: '#6366F1', WRESTLING: '#A855F7', GYM_SESSIONS: '#EF4444',
-  };
-  const CAT_ORDER = ['GYM', 'GYM_CARDIO', 'CARDIO', 'JUDO', 'WRESTLING', 'GYM_SESSIONS'];
-  const catOf = (sportsJson) => {
-    let arr = [];
-    try { arr = JSON.parse(sportsJson) || []; } catch { arr = []; }
-    const s = new Set(arr);
-    if (s.has('JUDO')) return 'JUDO';
-    if (s.has('WRESTLING')) return 'WRESTLING';
-    if (s.has('GYM') && s.has('CARDIO')) return 'GYM_CARDIO';
-    if (s.has('CARDIO')) return 'CARDIO';
-    return 'GYM';
-  };
+  // Revenue by membership category (YTD) — CAT_* mapping + catOf/sportCat are
+  // module-level so the date-filtered /stats/panel endpoint reuses them.
   const catTotals = Object.fromEntries(CAT_ORDER.map((k) => [k, 0]));
-  // Deleted members leave orphaned payments (m.sports NULL). Fall back to the
-  // sport recorded on the payment so their subscription revenue keeps its
-  // category (judo/wrestling/cardio) instead of all collapsing into Gym.
-  const sportCat = (sp) => (sp === 'JUDO' ? 'JUDO' : sp === 'WRESTLING' ? 'WRESTLING' : sp === 'CARDIO' ? 'CARDIO' : 'GYM');
   db.prepare(
     'SELECT p.kind kind, p.sport sport, m.sports msports, SUM(p.amount) s '
     + 'FROM payments p LEFT JOIN members m ON m.id = p.member_id '
@@ -783,6 +803,129 @@ function stats(db) {
   };
 }
 
+// ── Date-filtered dashboard panels ────────────────────────────────────────────
+// Each filterable Statistics panel carries its own before/after picker; this
+// recomputes a single panel's dataset for an arbitrary [after, before] window.
+// Bounds are optional 'YYYY-MM-DD' query params; payments/entries store
+// 'YYYY-MM-DDThh:mm:ss', so a lexical day-boundary compare is exact (before
+// includes its whole day). Omit both bounds for the all-time dataset.
+function dayRange(query) {
+  return {
+    after: query.after ? `${query.after}T00:00:00` : null,
+    before: query.before ? `${query.before}T23:59:59` : null,
+  };
+}
+function whereRange(col, after, before, extra) {
+  const parts = [];
+  const args = [];
+  if (after) { parts.push(`${col} >= ?`); args.push(after); }
+  if (before) { parts.push(`${col} <= ?`); args.push(before); }
+  if (extra) parts.push(extra);
+  return { clause: parts.length ? `WHERE ${parts.join(' AND ')}` : '', args };
+}
+
+// Revenue split by membership category over [after, before], plus the
+// subscriptions/sessions totals for the same window (for the footer percentages).
+function panelRevenueBySport(db, after, before) {
+  const { clause, args } = whereRange('p.date', after, before, "p.kind IN ('subscription','session')");
+  const catTotals = Object.fromEntries(CAT_ORDER.map((k) => [k, 0]));
+  db.prepare(
+    'SELECT p.kind kind, p.sport sport, m.sports msports, SUM(p.amount) s '
+    + 'FROM payments p LEFT JOIN members m ON m.id = p.member_id '
+    + `${clause} GROUP BY p.kind, p.sport, m.sports`,
+  ).all(...args).forEach((r) => {
+    const cat = r.kind === 'session' ? 'GYM_SESSIONS' : (r.msports ? catOf(r.msports) : sportCat(r.sport));
+    catTotals[cat] += r.s;
+  });
+  const bySport = CAT_ORDER
+    .filter((k) => catTotals[k] > 0)
+    .map((k) => ({ label: CAT_LABEL[k], value: catTotals[k], color: CAT_COLOR[k] }));
+  const sumKind = (kind) => {
+    const w = whereRange('date', after, before, `kind='${kind}'`);
+    return db.prepare(`SELECT COALESCE(SUM(amount),0) s FROM payments ${w.clause}`).get(...w.args).s;
+  };
+  return { bySport, subscriptions: sumKind('subscription'), sessions: sumKind('session') };
+}
+
+// Cumulative registered-member total at each month-end in [after, before]
+// (defaults to Jan 1 → today). Labels carry a 2-digit year when the span crosses years.
+function panelMemberGrowth(db, after, before) {
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const now = new Date();
+  const start = after ? new Date(after) : new Date(now.getFullYear(), 0, 1);
+  const end = before ? new Date(before) : now;
+  const spansYears = start.getFullYear() !== end.getFullYear();
+  const out = [];
+  let y = start.getFullYear();
+  let m = start.getMonth();
+  // Cap at 120 buckets (10y) so a wild range can't loop unbounded.
+  for (let i = 0; i < 120 && (y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth())); i++) {
+    const monthEnd = iso(new Date(y, m + 1, 1, 0, 0, 0));
+    const c = db.prepare('SELECT COUNT(*) c FROM members WHERE join_date < ?').get(monthEnd).c;
+    out.push({ month: spansYears ? `${MON[m]} '${String(y).slice(2)}` : MON[m], value: c });
+    m += 1;
+    if (m > 11) { m = 0; y += 1; }
+  }
+  return out;
+}
+
+// Members who trained (had an entry) within [after, before], counted per sport.
+function panelActiveBySport(db, after, before) {
+  const { clause, args } = whereRange('entry_time', after, before, 'member_id IS NOT NULL');
+  const rows = db.prepare(
+    `SELECT m.sports sports FROM members m WHERE m.id IN (SELECT DISTINCT member_id FROM entries ${clause})`,
+  ).all(...args);
+  const SPORTS = ['GYM', 'JUDO', 'WRESTLING', 'CARDIO'];
+  const counts = Object.fromEntries(SPORTS.map((s) => [s, 0]));
+  rows.forEach((r) => {
+    let arr = [];
+    try { arr = JSON.parse(r.sports) || []; } catch { arr = []; }
+    arr.forEach((s) => { if (counts[s] !== undefined) counts[s] += 1; });
+  });
+  return SPORTS.map((s) => ({
+    label: s[0] + s.slice(1, 4).toLowerCase(),
+    value: counts[s],
+    color: `var(--${s === 'GYM' ? 'accent' : s.toLowerCase()})`,
+  }));
+}
+
+// Entries-by-hour×day heatmap (08h–22h, 15 cols) over [after, before].
+function panelHeatmap(db, after, before) {
+  const { clause, args } = whereRange('entry_time', after, before);
+  const heat = Array.from({ length: 7 }, () => new Array(15).fill(0));
+  db.prepare(`SELECT entry_time FROM entries ${clause}`).all(...args).forEach((r) => {
+    const dt = new Date(r.entry_time);
+    if (dt.getHours() >= 8 && dt.getHours() <= 22) heat[dt.getDay()][dt.getHours() - 8] += 1;
+  });
+  return heat;
+}
+
+// Top 10 most frequent visitors (by entry count) within [after, before].
+function panelTopVisitors(db, after, before) {
+  const { clause, args } = whereRange('entry_time', after, before, 'member_id IS NOT NULL');
+  return db.prepare(
+    'SELECT member_id, COUNT(*) visits, '
+    + "AVG((julianday(COALESCE(exit_time, datetime('now')))-julianday(entry_time))*1440) avg_min "
+    + `FROM entries ${clause} GROUP BY member_id ORDER BY visits DESC LIMIT 10`,
+  ).all(...args).map((r) => ({
+    member: memberRowToDict(db, getMember(db, r.member_id)),
+    visits: r.visits,
+    avgMin: Math.round(r.avg_min || 0),
+  }));
+}
+
+function statsPanel(db, { query = {} }) {
+  const { after, before } = dayRange(query);
+  switch (query.metric) {
+    case 'revenueBySport': return { data: panelRevenueBySport(db, after, before) };
+    case 'memberGrowth': return { data: panelMemberGrowth(db, after, before) };
+    case 'activeBySport': return { data: panelActiveBySport(db, after, before) };
+    case 'heatmap': return { data: panelHeatmap(db, after, before) };
+    case 'topVisitors': return { data: panelTopVisitors(db, after, before) };
+    default: throw new HttpError(400, 'Unknown metric');
+  }
+}
+
 // Member reports — detailed session-revenue and insurance breakdowns. All money
 // comes from the payments table (members only; stock never touches it).
 function memberReports(db) {
@@ -874,6 +1017,13 @@ function memberReports(db) {
   };
 }
 
+// Distinct hue per stock category — shared by the category donut, the daily
+// breakdown, and the date-filtered /reports/stock/panel endpoint.
+const STOCK_CAT_COLOR = {
+  Equipment: '#6366F1', Supplements: '#22C55E', Consumables: '#06B6D4',
+  Merchandise: '#F59E0B', Maintenance: '#A855F7',
+};
+
 // Stock dashboard — sales / profit / loss for the current calendar month.
 // Buy & sell prices come from the item (joined), so figures track the catalogue.
 function stockDashboard(db) {
@@ -886,11 +1036,6 @@ function stockDashboard(db) {
   const REV = 'COALESCE(sl.cost, sl.qty * si.sell)';
   const SOLD = 'FROM stock_log sl JOIN stock_items si ON si.id=sl.item_id '
     + "WHERE sl.action='remove' AND sl.reason='Sold'";
-  // Distinct hue per category — shared by the category donut and daily breakdown.
-  const CAT_COLOR = {
-    Equipment: '#6366F1', Supplements: '#22C55E', Consumables: '#06B6D4',
-    Merchandise: '#F59E0B', Maintenance: '#A855F7',
-  };
 
   // Sold this month: revenue (logged sale price, else qty×sell), units, and COGS.
   // "units" counts a weight sale (sold by the gram) as one item, not its gram count,
@@ -913,8 +1058,10 @@ function stockDashboard(db) {
 
   const revenue = sold.rev;
   const grossProfit = revenue - sold.cogs;
-  // Current inventory value at purchase cost.
+  // Current inventory value — at purchase cost (capital tied up) and at sale price
+  // (what it's worth on the shelf); the gap is the unrealized markup.
   const stockValue = db.prepare('SELECT COALESCE(SUM(qty * buy),0) v FROM stock_items').get().v;
+  const stockValueSale = db.prepare('SELECT COALESCE(SUM(qty * sell),0) v FROM stock_items').get().v;
 
   // Sales revenue by month (this year).
   const mRows = db.prepare(
@@ -941,7 +1088,7 @@ function stockDashboard(db) {
     const key = iso(day).slice(0, 10);
     const e = byDate[key];
     const breakdown = e
-      ? Object.entries(e.cats).map(([cat, val]) => ({ label: cat, value: val, color: CAT_COLOR[cat] || '#22C55E' }))
+      ? Object.entries(e.cats).map(([cat, val]) => ({ label: cat, value: val, color: STOCK_CAT_COLOR[cat] || '#22C55E' }))
         .sort((a, b) => b.value - a.value)
       : [];
     daily.push({ day: String(day.getDate()), date: key, value: e ? e.total : 0, breakdown });
@@ -949,11 +1096,11 @@ function stockDashboard(db) {
 
   // Sales revenue by category (YTD).
   const cRows = db.prepare(`SELECT si.category cat, COALESCE(SUM(${REV}),0) s ${SOLD} AND sl.date>=? GROUP BY si.category ORDER BY s DESC`).all(yearStart);
-  const byCategory = cRows.filter((r) => r.s > 0).map((r) => ({ label: r.cat, value: r.s, color: CAT_COLOR[r.cat] || '#22C55E' }));
+  const byCategory = cRows.filter((r) => r.s > 0).map((r) => ({ label: r.cat, value: r.s, color: STOCK_CAT_COLOR[r.cat] || '#22C55E' }));
 
   // Current stock value by category (qty × buy) — where capital is tied up now.
   const vRows = db.prepare('SELECT category cat, COALESCE(SUM(qty * buy),0) v FROM stock_items GROUP BY category ORDER BY v DESC').all();
-  const valueByCategory = vRows.filter((r) => r.v > 0).map((r) => ({ label: r.cat, value: r.v, color: CAT_COLOR[r.cat] || '#22C55E' }));
+  const valueByCategory = vRows.filter((r) => r.v > 0).map((r) => ({ label: r.cat, value: r.v, color: STOCK_CAT_COLOR[r.cat] || '#22C55E' }));
 
   return {
     salesRevenueMonth: revenue,
@@ -963,11 +1110,57 @@ function stockDashboard(db) {
     lossesMonth: loss.val,
     lossUnitsMonth: loss.units,
     stockValue,
+    stockValueSale,
     monthly,
     daily,
     byCategory,
     valueByCategory,
   };
+}
+
+// Stock KPI summary over an arbitrary [after, before] window — powers the Stock
+// Dashboard's shared date filter across its top cards. Same money/units rules as
+// stockDashboard() (weight sales count as one unit; buy/sell join the catalogue).
+function stockSummary(db, { query = {} }) {
+  const { after, before } = dayRange(query);
+  const UNITS = "SUM(CASE WHEN si.unit='g' THEN 1 ELSE sl.qty END)";
+  const JOIN = 'FROM stock_log sl JOIN stock_items si ON si.id=sl.item_id ';
+  const soldW = whereRange('sl.date', after, before, "sl.action='remove' AND sl.reason='Sold'");
+  const sold = db.prepare(
+    'SELECT COALESCE(SUM(COALESCE(sl.cost, sl.qty * si.sell)),0) rev, '
+    + `COALESCE(${UNITS},0) units, COALESCE(SUM(sl.qty * si.buy),0) cogs `
+    + JOIN + soldW.clause,
+  ).get(...soldW.args);
+  const lossW = whereRange('sl.date', after, before, "sl.action='remove' AND sl.reason IN ('Damaged','Expired')");
+  const loss = db.prepare(
+    `SELECT COALESCE(SUM(sl.qty * si.buy),0) val, COALESCE(${UNITS},0) units ` + JOIN + lossW.clause,
+  ).get(...lossW.args);
+  const grossProfit = sold.rev - sold.cogs;
+  return {
+    salesRevenue: sold.rev,
+    unitsSold: sold.units,
+    grossProfit,
+    marginPct: sold.rev > 0 ? Math.round((grossProfit / sold.rev) * 100) : 0,
+    losses: loss.val,
+    lossUnits: loss.units,
+  };
+}
+
+// A single Stock Dashboard panel recomputed for an arbitrary [after, before]
+// window (its own before/after picker). Sales metrics are transactional, so they
+// filter by the sale date on the stock log.
+function stockPanel(db, { query = {} }) {
+  const { after, before } = dayRange(query);
+  if (query.metric === 'salesByCategory') {
+    const w = whereRange('sl.date', after, before, "sl.action='remove' AND sl.reason='Sold'");
+    const rows = db.prepare(
+      'SELECT si.category cat, COALESCE(SUM(COALESCE(sl.cost, sl.qty * si.sell)),0) s '
+      + 'FROM stock_log sl JOIN stock_items si ON si.id=sl.item_id '
+      + `${w.clause} GROUP BY si.category ORDER BY s DESC`,
+    ).all(...w.args);
+    return { data: rows.filter((r) => r.s > 0).map((r) => ({ label: r.cat, value: r.s, color: STOCK_CAT_COLOR[r.cat] || '#22C55E' })) };
+  }
+  throw new HttpError(400, 'Unknown metric');
 }
 
 // Roster = every member who practises the sport, merged with their discipline
@@ -1302,6 +1495,7 @@ const ROUTES = [
   { m: 'GET', re: /^\/live\/sessions-owed$/, fn: liveSessionsOwed },
   { m: 'GET', re: /^\/live\/expiring-soon$/, fn: liveExpiringSoon },
   { m: 'POST', re: /^\/swipe$/, auth: true, fn: swipe },
+  { m: 'POST', re: /^\/members\/(\d+)\/force-exit$/, auth: true, fn: forceExit },
   { m: 'POST', re: /^\/guest-session$/, auth: true, fn: guestSession },
   { m: 'DELETE', re: /^\/guest-session\/(\d+)$/, auth: true, fn: removeGuestSession },
   { m: 'POST', re: /^\/members$/, auth: true, fn: createMember },
@@ -1312,8 +1506,11 @@ const ROUTES = [
   { m: 'POST', re: /^\/members\/(\d+)\/insurance$/, auth: true, fn: payInsurance },
   { m: 'GET', re: /^\/members\/(\d+)\/entries$/, fn: memberEntries },
   { m: 'GET', re: /^\/stats$/, fn: stats },
+  { m: 'GET', re: /^\/stats\/panel$/, fn: statsPanel },
   { m: 'GET', re: /^\/reports\/members$/, fn: memberReports },
   { m: 'GET', re: /^\/reports\/stock$/, fn: stockDashboard },
+  { m: 'GET', re: /^\/reports\/stock\/summary$/, fn: stockSummary },
+  { m: 'GET', re: /^\/reports\/stock\/panel$/, fn: stockPanel },
   { m: 'GET', re: /^\/judo$/, fn: judo },
   { m: 'PUT', re: /^\/judo\/schedule$/, auth: true, fn: setJudoSchedule },
   { m: 'PUT', re: /^\/judo\/students\/(\d+)$/, auth: true, fn: updateJudoStudent },

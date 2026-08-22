@@ -9,7 +9,7 @@ import Portal from '../components/Portal.jsx';
 const TWO_HOURS = 2 * 3600 * 1000;
 
 export default function LiveStatus() {
-  const { members, presence, exits, today, setRoute, setFocusMemberId, removeGuestSession } = useContext(AppCtx);
+  const { members, presence, exits, today, setRoute, setFocusMemberId, removeGuestSession, forceExitMember } = useContext(AppCtx);
   const t = useT();
   const [, tick] = useState(0);
   const [modal, setModal] = useState(null);   // 'inside' | 'exits' | 'subscribed' | 'entries' | 'owed' | 'expiring' | 'balances' | null
@@ -17,6 +17,7 @@ export default function LiveStatus() {
   const [entriesToday, setEntriesToday] = useState(null);
   const [owedList, setOwedList] = useState(null);
   const [expiringList, setExpiringList] = useState(null);
+  const [confirmExit, setConfirmExit] = useState(null);   // member pending manual "mark as exited"
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(t);
@@ -107,7 +108,14 @@ export default function LiveStatus() {
               : (days > 0 ? t('{n} days remaining', { n: days }) : t('subscription expired'))}
           </div>
         </div>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--faint)' }}>{t('in')} {fmtTime(entryTime)}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--faint)' }}>{t('in')} {fmtTime(entryTime)}</span>
+          <button className="icon-btn" style={{ width: 30, height: 30 }} title={t('Mark as exited')}
+            aria-label={t("Mark {name} as exited", { name: member.name })}
+            onClick={(e) => { e.stopPropagation(); setConfirmExit(member); }}>
+            <Icons.trash width="15" height="15" />
+          </button>
+        </div>
       </div>
     );
   };
@@ -369,6 +377,23 @@ export default function LiveStatus() {
               <button className="x-btn" onClick={() => setModal(null)} aria-label={t('Close')}>×</button>
             </div>
             <div className="modal-body kpi-list" style={{ padding: 0 }}>{renderBody()}</div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
+      {confirmExit && (
+        <Portal>
+        <div className="modal-center" onClick={() => setConfirmExit(null)}>
+          <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><div className="modal-title">{t('Mark as exited')}</div></div>
+            <div className="modal-body">
+              {t('Mark ')}<strong>{confirmExit.name}</strong>{t(" as exited? Use this if they left without swiping their tag at the exit reader — it closes their visit exactly as if they had.")}
+            </div>
+            <div className="modal-foot">
+              <button className="btn ghost" onClick={() => setConfirmExit(null)}>{t('Cancel')}</button>
+              <button className="btn danger" onClick={() => { forceExitMember(confirmExit.id, confirmExit.name); setConfirmExit(null); }}>{t('Mark as exited')}</button>
+            </div>
           </div>
         </div>
         </Portal>
