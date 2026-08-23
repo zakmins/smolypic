@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useState } from 'react';
 import { AppCtx } from '../App.jsx';
 import { api } from '../api.js';
 import { Avatar, SportBadge, MembershipBadge, Icons } from '../components/atoms.jsx';
-import { hhmmss, fmtTime, fmtDate, durationLabel, daysRemaining, memberStatus, usesSessionQuota, isSessionsOwed, expiringReason, initials, dzd } from '../utils.js';
+import { hhmmss, fmtTime, fmtDate, durationLabel, daysRemaining, memberStatus, usesSessionQuota, isSessionsOwed, expiringReason, initials, dzd, isGoldMember } from '../utils.js';
 import { useT } from '../i18n.jsx';
 import Portal from '../components/Portal.jsx';
 
@@ -81,6 +81,7 @@ export default function LiveStatus() {
     const expired = status === 'expired';
     const usesSessions = usesSessionQuota(member);   // metered sub
     const days = daysRemaining(member);
+    const gold = isGoldMember(member);
     return (
       <div key={`m-${member.id}`} className={`live-row ${expired ? 'expired' : ''}`}
         onClick={() => goToMember(member.id)} role="button" title={t("Open {name}'s profile", { name: member.name })}>
@@ -96,7 +97,7 @@ export default function LiveStatus() {
           </div>
         </div>
         <div>
-          <div className="live-timer" style={{ color: expired ? 'var(--red)' : 'var(--green)' }}>
+          <div className="live-timer" style={{ color: gold ? 'var(--gold)' : expired ? 'var(--red)' : 'var(--green)' }}>
             {hhmmss(now - entryTime)}
           </div>
           <div className={`live-remaining ${expired ? 'warn' : ''}`}>
@@ -192,6 +193,7 @@ export default function LiveStatus() {
       );
     }
     const m = e.member;
+    const gold = isGoldMember(m);
     return (
       <div key={`em-${m.id}-${i}`} className="live-row" onClick={() => goToMember(m.id)}
         role="button" title={t("Open {name}'s profile", { name: m.name })}>
@@ -205,9 +207,9 @@ export default function LiveStatus() {
         </div>
         <div>
           {inside
-            ? <div className="live-timer" style={{ color: 'var(--green)' }}>{hhmmss(now - e.entryTime)}</div>
+            ? <div className="live-timer" style={{ color: gold ? 'var(--gold)' : 'var(--green)' }}>{hhmmss(now - e.entryTime)}</div>
             : <div className="live-remaining">{t('Exited {time}', { time: fmtTime(e.exitTime) })}</div>}
-          {inside && <div className="live-remaining" style={{ color: 'var(--green)' }}>{t('Inside')}</div>}
+          {inside && <div className="live-remaining" style={{ color: gold ? 'var(--gold)' : 'var(--green)' }}>{t('Inside')}</div>}
         </div>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--faint)' }}>{t('in')} {fmtTime(e.entryTime)}</div>
       </div>

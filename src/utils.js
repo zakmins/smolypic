@@ -31,6 +31,10 @@ export const isMeteredSub = (m) => isSubscription(m) && m.sessionsTotal != null;
 // Members whose entries burn a session: metered subs.
 export const usesSessionQuota = isMeteredSub;
 
+// Members with a custom entry/exit color instead of the usual green/red.
+const GOLD_MEMBERS = ['wissam elam'];
+export const isGoldMember = (m) => !!m?.name && GOLD_MEMBERS.includes(m.name.trim().toLowerCase());
+
 export const memberStatus = (m) => {
   // Expires on date; metered subs also expire when sessions run out.
   const dateOk = daysRemaining(m) > 0;

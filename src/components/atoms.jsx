@@ -1,5 +1,5 @@
 import React from 'react';
-import { initials, SPORT_COLOR, BELT_COLOR } from '../utils.js';
+import { initials, isGoldMember, SPORT_COLOR, BELT_COLOR } from '../utils.js';
 import { useT } from '../i18n.jsx';
 
 export function Avatar({ member, size = '' }) {
@@ -12,8 +12,9 @@ export function Avatar({ member, size = '' }) {
       </div>
     );
   }
+  const background = isGoldMember(member) ? 'linear-gradient(135deg, var(--gold), #FFA500)' : `hsl(${member.hue} 62% 62%)`;
   return (
-    <div className={`avatar ${size}`} style={{ background: `hsl(${member.hue} 62% 62%)` }} aria-hidden="true">
+    <div className={`avatar ${size}`} style={{ background }} aria-hidden="true">
       {initials(member.name)}
     </div>
   );

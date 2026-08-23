@@ -1,6 +1,6 @@
 import React from 'react';
 import { Avatar, SportBadge, Icons } from './atoms.jsx';
-import { daysRemaining, memberStatus, fmtDate, fmtTime, durationLabel, isUnlimitedSub } from '../utils.js';
+import { daysRemaining, memberStatus, fmtDate, fmtTime, durationLabel, isUnlimitedSub, isGoldMember } from '../utils.js';
 import { useT } from '../i18n.jsx';
 
 /* The card stays on screen until the operator dismisses it (click ×, the
@@ -45,13 +45,14 @@ export default function SwipePopup({ event, queued, onDismiss }) {
   const days = daysRemaining(member);
   const expired = status === 'expired';
   const entering = kind === 'in';
+  const gold = isGoldMember(member);
 
   return (
     <div className="popup-layer" onClick={onDismiss}>
       <div className="swipe-card" onClick={(e) => e.stopPropagation()} role="alertdialog" aria-label={entering ? t('Member entry') : t('Member exit')}>
-        <div className={`swipe-band ${entering ? 'in' : 'out'}`} />
+        <div className={`swipe-band ${gold ? 'gold' : entering ? 'in' : 'out'}`} />
         <div className="swipe-head">
-          <span className={`badge ${entering ? 'green' : 'red'}`}>{entering ? t('→ Entry') : t('← Exit')}</span>
+          <span className={`badge ${gold ? 'gold' : entering ? 'green' : 'red'}`}>{entering ? t('→ Entry') : t('← Exit')}</span>
           <span className="swipe-time mono">{fmtTime(event.at)}</span>
           <button className="x-btn" onClick={onDismiss} aria-label={t('Dismiss')}>×</button>
         </div>

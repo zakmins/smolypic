@@ -5,7 +5,7 @@ import Select from '../components/Select.jsx';
 import DatePicker from '../components/DatePicker.jsx';
 import { SPORTS, dzd, fmtDate, age, daysRemaining, memberStatus, fmtTime, durationLabel,
   isSubscription, isUnlimitedSub, usesSessionQuota, remainingLabel, pageList,
-  insuranceStatus, insuranceDaysLeft, INSURANCE_PRICE,
+  insuranceStatus, insuranceDaysLeft, INSURANCE_PRICE, isGoldMember,
   subPlans } from '../utils.js';
 import { api } from '../api.js';
 import { useT } from '../i18n.jsx';
@@ -207,7 +207,7 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
   const pct = usesSessions
     ? Math.max(0, Math.min(100, (m.sessionsLeft / m.sessionsTotal) * 100))
     : Math.max(0, Math.min(100, (days / m.durationDays) * 100));
-  const barClass = pct <= 15 ? 'low' : pct <= 40 ? 'mid' : '';
+  const barClass = isGoldMember(m) ? 'gold' : pct <= 15 ? 'low' : pct <= 40 ? 'mid' : '';
   const insideNow = presence.some((p) => p.memberId === m.id);
 
   const [visits, setVisits] = useState(null);

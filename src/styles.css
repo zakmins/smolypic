@@ -28,6 +28,7 @@
   --green: #2BD786;        --green-soft: rgba(43, 215, 134, 0.13);
   --amber: #FFB224;        --amber-soft: rgba(255, 178, 36, 0.13);
   --red: #FF5468;          --red-soft: rgba(255, 84, 104, 0.13);
+  --gold: #FFD700;         --gold-soft: rgba(255, 215, 0, 0.16);
   --judo: #4D9FFF;         --judo-soft: rgba(77, 159, 255, 0.14);
   --wrestling: #B07CFF;    --wrestling-soft: rgba(176, 124, 255, 0.14);
   --cardio: #22C7E6;       --cardio-soft: rgba(34, 199, 230, 0.13);
@@ -63,6 +64,7 @@
   --green: #0E9F63;        --green-soft: rgba(14, 159, 99, 0.11);
   --amber: #B26E00;        --amber-soft: rgba(196, 130, 10, 0.13);
   --red: #DC3B50;          --red-soft: rgba(220, 59, 80, 0.10);
+  --gold: #B8860B;         --gold-soft: rgba(184, 134, 11, 0.14);
   --judo: #2470E0;         --judo-soft: rgba(36, 112, 224, 0.10);
   --wrestling: #8A4DE8;    --wrestling-soft: rgba(138, 77, 232, 0.10);
   --cardio: #0795B5;       --cardio-soft: rgba(7, 149, 181, 0.10);
@@ -344,6 +346,7 @@ input::placeholder { color: var(--faint); }
 .badge.green { background: var(--green-soft); color: var(--green); }
 .badge.amber { background: var(--amber-soft); color: var(--amber); }
 .badge.red { background: var(--red-soft); color: var(--red); }
+.badge.gold { background: var(--gold-soft); color: var(--gold); }
 .badge.neutral { background: var(--raised); color: var(--muted); }
 
 .avatar {
@@ -400,6 +403,7 @@ input::placeholder { color: var(--faint); }
 .swipe-band.in { background: var(--grad); }
 .swipe-band.out { background: linear-gradient(115deg, var(--red), #FF7A5C); }
 .swipe-band.unknown { background: linear-gradient(115deg, var(--amber), #FF8A3C); }
+.swipe-band.gold { background: linear-gradient(115deg, var(--gold), #FFA500); }
 .swipe-head {
   display: flex; align-items: center; gap: 10px;
   padding: 14px 18px 0 28px;
@@ -499,6 +503,7 @@ input::placeholder { color: var(--faint); }
 .progress > div { height: 100%; border-radius: 99px; background: var(--grad); transition: width 0.3s ease; }
 .progress > div.low { background: linear-gradient(115deg, var(--red), #FF7A5C); }
 .progress > div.mid { background: linear-gradient(115deg, var(--amber), #FFCB52); }
+.progress > div.gold { background: linear-gradient(115deg, var(--gold), #FFA500); }
 
 .kv { display: grid; grid-template-columns: 150px 1fr; gap: 9px 14px; font-size: 13.5px; }
 .kv .k { color: var(--muted); font-weight: 600; }

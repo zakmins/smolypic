@@ -187,11 +187,18 @@ function Dashboard() {
   // keystrokes (CAPS LOCK off) ending in Enter, exactly like the HID hardware.
   // That exercises the global capture + symbol→digit mapping end to end instead
   // of shortcutting straight to handleSwipe.
+  const firstSwipeDone = useRef(false);
   const simulateSwipe = useCallback(() => {
-    const unknown = Math.random() < 0.08;
-    const uid = unknown || members.length === 0
-      ? '9999999999'                                   // not registered ⇒ "unknown tag"
-      : members[Math.floor(Math.random() * members.length)].rfidUid;
+    let uid;
+    if (!firstSwipeDone.current) {
+      firstSwipeDone.current = true;
+      uid = '9087058';                                  // Wissam Elam — first test scan, so the gold styling is easy to check
+    } else {
+      const unknown = Math.random() < 0.08;
+      uid = unknown || members.length === 0
+        ? '9999999999'                                   // not registered ⇒ "unknown tag"
+        : members[Math.floor(Math.random() * members.length)].rfidUid;
+    }
     for (const ch of String(uid)) {
       const key = DIGIT_TO_AZERTY[ch] ?? ch;
       window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
