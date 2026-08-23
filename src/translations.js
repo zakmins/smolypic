@@ -293,6 +293,8 @@ export const FR = {
   "Months": "Mois",
   "Monthly subscription — no session limit.": "Abonnement mensuel — sans limite de séances.",
   "Monthly price (DZD)": "Prix mensuel (DZD)",
+  "Decrease sessions": "Diminuer les séances",
+  "Increase sessions": "Augmenter les séances",
   "Total": "Total",
   "{total} DZD  ({months} mo × {monthly})": "{total} DZD  ({months} mois × {monthly})",
   "Member is insured · {price} DZD/yr": "Membre assuré · {price} DZD/an",

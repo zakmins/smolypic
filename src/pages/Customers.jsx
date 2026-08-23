@@ -487,8 +487,12 @@ function MemberForm({ member, onClose, onSave }) {
       category: categoryOf(member.sports), planId: null,
       months, monthlyPrice: Math.round((member.amountPaid || 0) / months) || 0,
       insurance: !!member.insurance, rfidUid: member.rfidUid || '', photo: undefined,
+      sessionsLeft: member.sessionsLeft,
     };
   });
+  // Editing an existing member locks the billing terms (months, plan, price,
+  // total) — only the remaining session count on a metered plan can move.
+  const locked = !!member;
   const { pricing } = useContext(AppCtx);
   const insurancePrice = pricing?.insurance ?? INSURANCE_PRICE;
   // Partial payments (new members only): null ⇒ pay the full total; a number ⇒ a
@@ -527,16 +531,17 @@ function MemberForm({ member, onClose, onSave }) {
   const submit = () => {
     if (!f.name.trim()) return;
     const category = CATEGORIES.find((c) => c.key === f.category) || CATEGORIES[0];
-    const durationDays = months * 30;
+    const durationDays = locked ? member.durationDays : months * 30;
     const start = member?.subStart ?? new Date().toISOString().slice(0, 19);
     const end = new Date(new Date(start).getTime() + durationDays * 86400000).toISOString().slice(0, 19);
     // A plan with a session quota ⇒ metered (sessions × months); an unlimited
-    // plan (sessions = null) carries no quota (NULL).
+    // plan (sessions = null) carries no quota (NULL). Editing keeps the quota
+    // that was set at signup/renewal — only the remaining count can be adjusted.
     const perMonth = selectedPlan && selectedPlan.sessions != null ? selectedPlan.sessions : null;
-    const sessionsTotal = perMonth != null ? perMonth * months : null;
-    const sessionsLeft = sessionsTotal == null
-      ? null
-      : (member && member.sessionsTotal != null ? member.sessionsLeft : sessionsTotal);
+    const sessionsTotal = locked ? member.sessionsTotal : (perMonth != null ? perMonth * months : null);
+    const sessionsLeft = locked
+      ? (sessionsTotal == null ? null : Math.round(Number(f.sessionsLeft) || 0))
+      : sessionsTotal;
     onSave({
       id: member?.id,                       // undefined ⇒ the API creates it
       name: f.name, gender: f.gender, dob: f.dob, phone: f.phone, bloodType: f.bloodType || null,
@@ -588,20 +593,35 @@ function MemberForm({ member, onClose, onSave }) {
                 placeholder={t('Click here, then scan the tag')} /></div>
 
             <div className="field"><label>{t('Months')}</label>
-              <input type="number" min="1" value={f.months} onChange={(e) => set('months', Number(e.target.value))} /></div>
+              <input type="number" min="1" value={f.months} disabled={locked}
+                onChange={(e) => set('months', Number(e.target.value))} /></div>
             <div className="field full"><label>{t('Subscription plan')}</label>
               {plans.length ? (
                 <Select value={f.planId || ''} onChange={(v) => set('planId', v)} ariaLabel={t('Subscription plan')}
-                  options={plans.map((p) => [p.id, planLabel(p, t)])} />
+                  disabled={locked} options={plans.map((p) => [p.id, planLabel(p, t)])} />
               ) : (
                 <div style={{ marginTop: 9, fontSize: 13, color: 'var(--muted)', fontWeight: 500 }}>
                   {t('No plans for this category — add one in Settings.')}
                 </div>
               )}</div>
             <div className="field"><label>{t('Monthly price (DZD)')}</label>
-              <input type="number" min="0" value={f.monthlyPrice} onChange={(e) => set('monthlyPrice', Number(e.target.value))} /></div>
+              <input type="number" min="0" value={f.monthlyPrice} disabled={locked}
+                onChange={(e) => set('monthlyPrice', Number(e.target.value))} /></div>
             <div className="field"><label>{t('Total')}</label>
               <input disabled value={t('{total} DZD  ({months} mo × {monthly})', { total, months, monthly })} /></div>
+
+            {locked && member.sessionsTotal != null && (
+              <div className="field"><label>{t('Sessions remaining')}</label>
+                <div className="stepper">
+                  <button type="button" className="btn sm" aria-label={t('Decrease sessions')}
+                    onClick={() => set('sessionsLeft', Math.round(Number(f.sessionsLeft) || 0) - 1)}>−</button>
+                  <input type="number" value={f.sessionsLeft}
+                    onChange={(e) => set('sessionsLeft', e.target.value === '' ? '' : Number(e.target.value))} />
+                  <button type="button" className="btn sm" aria-label={t('Increase sessions')}
+                    onClick={() => set('sessionsLeft', Math.round(Number(f.sessionsLeft) || 0) + 1)}>+</button>
+                </div>
+              </div>
+            )}
 
             {!member && (
               <>

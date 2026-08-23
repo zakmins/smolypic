@@ -125,6 +125,7 @@ function allMembers(db) {
       gender: r.gender,
       dob: r.dob,
       phone: r.phone,
+      bloodType: r.blood_type,
       sports: JSON.parse(r.sports),
       membershipType: r.membership_type,
       subStart: r.sub_start,

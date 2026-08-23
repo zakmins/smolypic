@@ -8,7 +8,7 @@ import { Icons } from './atoms.jsx';
 
 const norm = (options) => options.map((o) => (Array.isArray(o) ? { value: o[0], label: o[1] } : o));
 
-export default function Select({ value, onChange, options, ariaLabel, width, placeholder = 'Select…' }) {
+export default function Select({ value, onChange, options, ariaLabel, width, placeholder = 'Select…', disabled = false }) {
   const opts = norm(options);
   const [open, setOpen] = useState(false);
   const triggerRef = useRef(null);
@@ -81,12 +81,12 @@ export default function Select({ value, onChange, options, ariaLabel, width, pla
 
   return (
     <div className="sel" style={width ? { width } : undefined}>
-      <button type="button" ref={triggerRef} className={`sel-trigger${open ? ' open' : ''}`}
+      <button type="button" ref={triggerRef} className={`sel-trigger${open ? ' open' : ''}`} disabled={disabled}
         onClick={() => setOpen((o) => !o)} aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel}>
         <span className={current ? 'sel-val' : 'sel-placeholder'}>{current ? current.label : placeholder}</span>
         <Icons.chevron width="15" height="15" className="sel-caret" />
       </button>
-      {pop}
+      {!disabled && pop}
     </div>
   );
 }
