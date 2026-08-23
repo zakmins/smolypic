@@ -498,6 +498,8 @@ function MemberForm({ member, onClose, onSave }) {
   // Partial payments (new members only): null ⇒ pay the full total; a number ⇒ a
   // deposit, leaving the rest as the member's balance. Editing never bills.
   const [paidNow, setPaidNow] = useState(null);
+  // Discount (new members only): '' ⇒ no discount at all.
+  const [discount, setDiscount] = useState('');
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
 
   const months = Math.max(1, Number(f.months) || 1);
@@ -522,11 +524,25 @@ function MemberForm({ member, onClose, onSave }) {
     setF((x) => ({ ...x, monthlyPrice: selectedPlan.price }));
   }, [member, selectedPlan]);
   const monthly = Math.max(0, Number(f.monthlyPrice) || 0);
-  const total = months * monthly;
+  const rawTotal = months * monthly;
+  const discountAmt = discount === '' ? 0 : Math.min(rawTotal, Math.max(0, Number(discount) || 0));
+  const total = Math.max(0, rawTotal - discountAmt);
   // Default the deposit to the full total; it tracks the total until manually set.
-  const paid = paidNow == null ? total : Math.min(total, Math.max(0, Number(paidNow) || 0));
+  // paidNow holds the raw field text ('' while the user has cleared it) so the
+  // input never gets coerced to a displayed "0" mid-edit — that's what caused a
+  // leading zero to appear (e.g. typing "2" into a field the state had just
+  // reset to 0 produced "02", since the digit landed after the stray zero).
+  const paid = paidNow == null ? total : (paidNow === '' ? 0 : Math.min(total, Math.max(0, Number(paidNow) || 0)));
+  const paidDisplay = paidNow == null ? total : paidNow;
   const balance = Math.max(0, total - paid);
-  useEffect(() => { if (!member) setPaidNow((p) => (p == null ? null : Math.min(p, total))); }, [member, total]);
+  useEffect(() => {
+    if (member) return;
+    setPaidNow((p) => {
+      if (p == null || p === '') return p;
+      const n = Number(p);
+      return Number.isFinite(n) && n > total ? total : p;
+    });
+  }, [member, total]);
 
   const submit = () => {
     if (!f.name.trim()) return;
@@ -593,8 +609,8 @@ function MemberForm({ member, onClose, onSave }) {
                 placeholder={t('Click here, then scan the tag')} /></div>
 
             <div className="field"><label>{t('Months')}</label>
-              <input type="number" min="1" value={f.months} disabled={locked}
-                onChange={(e) => set('months', Number(e.target.value))} /></div>
+              <input type="number" min="1" value={f.months} disabled={locked} onFocus={(e) => e.target.select()}
+                onChange={(e) => set('months', e.target.value === '' ? '' : Number(e.target.value))} /></div>
             <div className="field full"><label>{t('Subscription plan')}</label>
               {plans.length ? (
                 <Select value={f.planId || ''} onChange={(v) => set('planId', v)} ariaLabel={t('Subscription plan')}
@@ -605,17 +621,25 @@ function MemberForm({ member, onClose, onSave }) {
                 </div>
               )}</div>
             <div className="field"><label>{t('Monthly price (DZD)')}</label>
-              <input type="number" min="0" value={f.monthlyPrice} disabled={locked}
-                onChange={(e) => set('monthlyPrice', Number(e.target.value))} /></div>
-            <div className="field"><label>{t('Total')}</label>
-              <input disabled value={t('{total} DZD  ({months} mo × {monthly})', { total, months, monthly })} /></div>
+              <input type="number" min="0" value={f.monthlyPrice} disabled={locked} onFocus={(e) => e.target.select()}
+                onChange={(e) => set('monthlyPrice', e.target.value === '' ? '' : Number(e.target.value))} /></div>
+            {!member && (
+              <div className="field"><label>{t('Discount (DZD)')}</label>
+                <input type="number" min="0" max={rawTotal} value={discount} onFocus={(e) => e.target.select()}
+                  onChange={(e) => setDiscount(e.target.value === '' ? '' : Number(e.target.value))} /></div>
+            )}
+            {!member && (
+              <div className="field"><label>{t('Balance due')}</label>
+                <input disabled value={dzd(balance)}
+                  style={balance > 0 ? { color: 'var(--red)', fontWeight: 700 } : undefined} /></div>
+            )}
 
             {locked && member.sessionsTotal != null && (
               <div className="field"><label>{t('Sessions remaining')}</label>
                 <div className="stepper">
                   <button type="button" className="btn sm" aria-label={t('Decrease sessions')}
                     onClick={() => set('sessionsLeft', Math.round(Number(f.sessionsLeft) || 0) - 1)}>−</button>
-                  <input type="number" value={f.sessionsLeft}
+                  <input type="number" value={f.sessionsLeft} onFocus={(e) => e.target.select()}
                     onChange={(e) => set('sessionsLeft', e.target.value === '' ? '' : Number(e.target.value))} />
                   <button type="button" className="btn sm" aria-label={t('Increase sessions')}
                     onClick={() => set('sessionsLeft', Math.round(Number(f.sessionsLeft) || 0) + 1)}>+</button>
@@ -624,15 +648,17 @@ function MemberForm({ member, onClose, onSave }) {
             )}
 
             {!member && (
-              <>
-                <div className="field"><label>{t('Amount paid now (DZD)')}</label>
-                  <input type="number" min="0" max={total} value={paid}
-                    onChange={(e) => setPaidNow(Number(e.target.value))} /></div>
-                <div className="field"><label>{t('Balance due')}</label>
-                  <input disabled value={dzd(balance)}
-                    style={balance > 0 ? { color: 'var(--red)', fontWeight: 700 } : undefined} /></div>
-              </>
+              <div className="field"><label>{t('Amount paid now (DZD)')}</label>
+                <input type="number" min="0" max={total} value={paidDisplay} onFocus={(e) => e.target.select()}
+                  onChange={(e) => setPaidNow(e.target.value === '' ? '' : Number(e.target.value))} /></div>
             )}
+            <div className="field"><label>{t('Total')}</label>
+              <input disabled value={dzd(total)} style={{ color: 'var(--accent)', fontWeight: 800 }} />
+              <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>
+                {discountAmt > 0
+                  ? t('({months} mo × {monthly} − {discount} discount)', { months, monthly, discount: discountAmt })
+                  : t('({months} mo × {monthly})', { months, monthly })}
+              </div></div>
 
             <div className="field"><label>{t('Insurance')}</label>
               <div className="check-row" style={{ marginTop: 9 }}>
@@ -659,7 +685,9 @@ function RenewForm({ member: m, onClose, onSave }) {
   const category = categoryOf(m.sports);
   const [months, setMonths] = useState(1);
   const [planId, setPlanId] = useState(null);
-  const [amount, setAmount] = useState(2500);
+  const [amount, setAmount] = useState(2500);   // sticker price, before any discount
+  // Discount: '' ⇒ no discount at all.
+  const [discount, setDiscount] = useState('');
   // Partial payment: null ⇒ pay the full fee; a number ⇒ a deposit, the rest is
   // added to the member's balance. Tracks the total until manually changed.
   const [paidNow, setPaidNow] = useState(null);
@@ -681,30 +709,29 @@ function RenewForm({ member: m, onClose, onSave }) {
   }, [selectedPlan, months]);
 
   // The full fee for this renewal, the deposit collected now, and the shortfall.
-  const total = amount;
-  const paid = paidNow == null ? total : Math.min(total, Math.max(0, Number(paidNow) || 0));
+  // paidNow holds the raw field text ('' while cleared) — see the matching note
+  // in MemberForm for why that avoids the leading-zero-on-type bug.
+  const discountAmt = discount === '' ? 0 : Math.min(amount, Math.max(0, Number(discount) || 0));
+  const total = Math.max(0, amount - discountAmt);
+  const paid = paidNow == null ? total : (paidNow === '' ? 0 : Math.min(total, Math.max(0, Number(paidNow) || 0)));
+  const paidDisplay = paidNow == null ? total : paidNow;
   const balance = Math.max(0, total - paid);
-  useEffect(() => { setPaidNow((p) => (p == null ? null : Math.min(p, total))); }, [total]);
+  useEffect(() => {
+    setPaidNow((p) => {
+      if (p == null || p === '') return p;
+      const n = Number(p);
+      return Number.isFinite(n) && n > total ? total : p;
+    });
+  }, [total]);
 
   const submit = () => {
     // Extend the date and apply the chosen plan for the renewed period. A plan
     // with a session quota ⇒ metered (sessions × months); unlimited ⇒ no quota.
-    const mo = Math.max(1, months);
+    const mo = Math.max(1, Number(months) || 1);
     const perMonth = selectedPlan && selectedPlan.sessions != null ? selectedPlan.sessions : null;
     const sessionsTotal = perMonth != null ? perMonth * mo : null;
     onSave({ days: mo * 30, applyPlan: true, sessionsTotal, amount: paid, total, method: 'Cash' });
   };
-
-  const payFields = (
-    <>
-      <div className="field"><label>{t('Amount paid now (DZD)')}</label>
-        <input type="number" min="0" max={total} value={paid}
-          onChange={(e) => setPaidNow(Number(e.target.value))} /></div>
-      <div className="field"><label>{t('Balance due')}</label>
-        <input disabled value={dzd(balance)}
-          style={balance > 0 ? { color: 'var(--red)', fontWeight: 700 } : undefined} /></div>
-    </>
-  );
 
   return (
     <Portal>
@@ -717,15 +744,37 @@ function RenewForm({ member: m, onClose, onSave }) {
         <div className="modal-body">
           <div className="form-grid">
             <div className="field"><label>{t('Months')}</label>
-              <input type="number" min="1" value={months} onChange={(e) => setMonths(Number(e.target.value))} /></div>
+              <input type="number" min="1" value={months} onFocus={(e) => e.target.select()}
+                onChange={(e) => setMonths(e.target.value === '' ? '' : Number(e.target.value))} /></div>
             <div className="field"><label>{t('Amount (DZD)')}</label>
-              <input type="number" min="0" value={amount} onChange={(e) => setAmount(Number(e.target.value))} /></div>
+              <input type="number" min="0" value={amount} onFocus={(e) => e.target.select()}
+                onChange={(e) => setAmount(e.target.value === '' ? '' : Number(e.target.value))} /></div>
+            <div className="field"><label>{t('Discount (DZD)')}</label>
+              <input type="number" min="0" max={amount} value={discount} onFocus={(e) => e.target.select()}
+                onChange={(e) => setDiscount(e.target.value === '' ? '' : Number(e.target.value))} /></div>
+            <div className="field"><label>{t('Balance due')}</label>
+              <input disabled value={dzd(balance)}
+                style={balance > 0 ? { color: 'var(--red)', fontWeight: 700 } : undefined} /></div>
             {plans.length > 0 && (
               <div className="field full"><label>{t('Subscription plan')}</label>
                 <Select value={planId || ''} onChange={(v) => setPlanId(v)} ariaLabel={t('Subscription plan')}
                   options={plans.map((p) => [p.id, planLabel(p, t)])} /></div>
             )}
-            {payFields}
+            {m.sessionsLeft < 0 && (
+              <div className="field full" style={{ fontSize: 12.5, color: 'var(--amber)', fontWeight: 600 }}>
+                {t('{n} owed session(s) will be deducted from the new quota.', { n: -m.sessionsLeft })}
+              </div>
+            )}
+            <div className="field"><label>{t('Amount paid now (DZD)')}</label>
+              <input type="number" min="0" max={total} value={paidDisplay} onFocus={(e) => e.target.select()}
+                onChange={(e) => setPaidNow(e.target.value === '' ? '' : Number(e.target.value))} /></div>
+            <div className="field"><label>{t('Total')}</label>
+              <input disabled value={dzd(total)} style={{ color: 'var(--accent)', fontWeight: 800 }} />
+              {discountAmt > 0 && (
+                <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>
+                  {t('({amount} − {discount} discount)', { amount: dzd(amount), discount: dzd(discountAmt) })}
+                </div>
+              )}</div>
           </div>
         </div>
         <div className="modal-foot">

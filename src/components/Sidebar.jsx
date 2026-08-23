@@ -8,6 +8,8 @@ import logoDark from '../assets/logo-dark.png';
 
 // Top-level navigation. A bare `item` is its own button (Live status stands
 // alone, no dropdown); a `group` is a collapsible dropdown holding sub-routes.
+// Each 'Dashboard' entry is admin-only — filtered out for a coach below.
+const ADMIN_ONLY_KEYS = ['stats', 'stock-dashboard'];
 const NAV = [
   { type: 'item', key: 'live', label: 'Live status', icon: Icons.live },
   { type: 'group', key: 'members', label: 'Members', icon: Icons.members, items: [
@@ -38,7 +40,10 @@ export default function Sidebar({ route, setRoute }) {
   const { currentUser } = useAuth();
   const { theme } = useTheme();
   const t = useT();
-  const nav = [...NAV, systemGroup(currentUser?.role === 'admin')];
+  const isAdmin = currentUser?.role === 'admin';
+  const nav = [...NAV, systemGroup(isAdmin)].map((e) => (
+    isAdmin || e.type !== 'group' ? e : { ...e, items: e.items.filter((it) => !ADMIN_ONLY_KEYS.includes(it.key)) }
+  ));
 
   // Each dropdown starts open if it owns the current route, so the active page
   // is always visible after a reload.

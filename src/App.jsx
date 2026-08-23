@@ -321,6 +321,20 @@ function Dashboard() {
     }
   }, [showToast]);
 
+  const collectSessions = useCallback(async (id, sessions, amount) => {
+    try {
+      const saved = await api(`/members/${id}/collect-sessions`, { method: 'POST', body: { sessions, amount } });
+      setMembers((ms) => ms.map((x) => (x.id === saved.id ? saved : x)));
+      const d = await api('/bootstrap');
+      setToday(d.today);
+      showToast('Sessions collected — {name}', { name: saved.name });
+      return saved;
+    } catch (e) {
+      showToast('Collection failed: {msg}', { msg: e.message });
+      return null;
+    }
+  }, [showToast]);
+
   const payInsurance = useCallback(async (id) => {
     try {
       const saved = await api(`/members/${id}/insurance`, { method: 'POST' });
@@ -416,20 +430,24 @@ function Dashboard() {
 
   const ctx = useMemo(() => ({
     members, presence, exits, today, stock, stockLog, consumed, pricing,
-    saveMember, renewMember, payInsurance, payBalance, deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing,
+    saveMember, renewMember, payInsurance, payBalance, collectSessions, deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing,
     savePreferences, simulateSwipe, handleSwipe, addGuestSession, removeGuestSession, forceExitMember, showToast,
     daysRemaining, memberStatus, setRoute, focusMemberId, setFocusMemberId,
-  }), [members, presence, exits, today, stock, stockLog, consumed, pricing, saveMember, renewMember, payInsurance, payBalance,
+  }), [members, presence, exits, today, stock, stockLog, consumed, pricing, saveMember, renewMember, payInsurance, payBalance, collectSessions,
        deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing, savePreferences, simulateSwipe, handleSwipe,
        addGuestSession, removeGuestSession, forceExitMember, showToast, focusMemberId]);
 
   const pages = {
     live: LiveStatus, customers: Customers, judo: Judo, wrestling: Wrestling,
-    stats: Statistics, stock: StockManagement, 'stock-inventory': StockInventory,
-    'members-reports': MembersReports, 'stock-dashboard': StockDashboard,
+    stock: StockManagement, 'stock-inventory': StockInventory,
+    'members-reports': MembersReports,
     settings: Settings,
   };
-  if (currentUser.role === 'admin') pages.users = Users;     // Manage users is admin-only
+  if (currentUser.role === 'admin') {
+    pages.users = Users;               // Manage users is admin-only
+    pages.stats = Statistics;          // Members Dashboard is admin-only
+    pages['stock-dashboard'] = StockDashboard;   // Stock Dashboard is admin-only
+  }
   const Page = pages[route] || LiveStatus;                   // never render a gated page to a coach
 
   return (

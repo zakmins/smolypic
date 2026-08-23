@@ -9,7 +9,7 @@ import Portal from '../components/Portal.jsx';
 const TWO_HOURS = 2 * 3600 * 1000;
 
 export default function LiveStatus() {
-  const { members, presence, exits, today, setRoute, setFocusMemberId, removeGuestSession, forceExitMember } = useContext(AppCtx);
+  const { members, presence, exits, today, setRoute, setFocusMemberId, removeGuestSession, forceExitMember, collectSessions } = useContext(AppCtx);
   const t = useT();
   const [, tick] = useState(0);
   const [modal, setModal] = useState(null);   // 'inside' | 'exits' | 'subscribed' | 'entries' | 'owed' | 'expiring' | 'balances' | null
@@ -18,6 +18,7 @@ export default function LiveStatus() {
   const [owedList, setOwedList] = useState(null);
   const [expiringList, setExpiringList] = useState(null);
   const [confirmExit, setConfirmExit] = useState(null);   // member pending manual "mark as exited"
+  const [collecting, setCollecting] = useState(null);   // owed-row entry pending session collection
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(t);
@@ -233,6 +234,8 @@ export default function LiveStatus() {
           <div className="live-name" style={{ color: 'var(--red)', fontSize: 14 }}>{o.owed === 1 ? t('owes {n} session', { n: o.owed }) : t('owes {n} sessions', { n: o.owed })}</div>
           <div className="live-remaining">{t('collect {amount}', { amount: dzd(o.amountToCollect) })}</div>
         </div>
+        <button type="button" className="btn sm" style={{ marginLeft: 10 }}
+          onClick={(e) => { e.stopPropagation(); setCollecting(o); }}>{t('Collect')}</button>
       </div>
     );
   };
@@ -383,6 +386,15 @@ export default function LiveStatus() {
         </Portal>
       )}
 
+      {collecting && (
+        <CollectSessionsForm entry={collecting} onClose={() => setCollecting(null)}
+          onSave={async (sessions, amount) => {
+            await collectSessions(collecting.member.id, sessions, amount);
+            setCollecting(null);
+            api('/live/sessions-owed').then(setOwedList).catch(() => {});
+          }} />
+      )}
+
       {confirmExit && (
         <Portal>
         <div className="modal-center" onClick={() => setConfirmExit(null)}>
@@ -400,5 +412,52 @@ export default function LiveStatus() {
         </Portal>
       )}
     </>
+  );
+}
+
+// Collect part or all of a member's owed sessions right from the "Sessions
+// owed" list, instead of waiting for their next renewal (renewals already
+// deduct any owed sessions from the new quota automatically). Staff types both
+// the session count being settled and the price collected independently.
+function CollectSessionsForm({ entry, onClose, onSave }) {
+  const t = useT();
+  const { member: m, owed, amountToCollect } = entry;
+  const [sessions, setSessions] = useState(owed);
+  const [amount, setAmount] = useState(amountToCollect);
+  const sessionsToCollect = Math.min(owed, Math.max(0, Number(sessions) || 0));
+  const remaining = Math.max(0, owed - sessionsToCollect);
+  return (
+    <Portal>
+    <div className="modal-center" onClick={onClose}>
+      <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('Collect sessions')}>
+        <div className="modal-head">
+          <div className="modal-title">{t('Collect sessions — {name}', { name: m.name })}</div>
+          <button className="x-btn" onClick={onClose} aria-label={t('Close')}>×</button>
+        </div>
+        <div className="modal-body">
+          <div className="form-grid">
+            <div className="field"><label>{t('Sessions owed')}</label>
+              <input disabled value={owed} /></div>
+            <div className="field"><label>{t('Sessions to collect')}</label>
+              <input type="number" min="0" max={owed} value={sessions} autoFocus onFocus={(e) => e.target.select()}
+                onChange={(e) => setSessions(e.target.value === '' ? '' : Number(e.target.value))} /></div>
+            <div className="field full"><label>{t('Amount to collect (DZD)')}</label>
+              <input type="number" min="0" value={amount} onFocus={(e) => e.target.select()}
+                onChange={(e) => setAmount(e.target.value === '' ? '' : Number(e.target.value))} /></div>
+            <div className="field full"><label>{t('Remaining after')}</label>
+              <input disabled value={remaining === 1 ? t('{n} session', { n: remaining }) : t('{n} sessions', { n: remaining })}
+                style={remaining > 0 ? { color: 'var(--red)', fontWeight: 700 } : { color: 'var(--green)', fontWeight: 700 }} /></div>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>{t('Cancel')}</button>
+          <button className="btn primary" disabled={sessionsToCollect <= 0}
+            onClick={() => onSave(sessionsToCollect, Math.max(0, Number(amount) || 0))}>
+            {sessionsToCollect === 1 ? t('Collect {n} session', { n: sessionsToCollect }) : t('Collect {n} sessions', { n: sessionsToCollect })}
+          </button>
+        </div>
+      </div>
+    </div>
+    </Portal>
   );
 }

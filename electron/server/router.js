@@ -88,7 +88,9 @@ function todayStats(db) {
   const srev = db.prepare("SELECT COALESCE(SUM(amount),0) s FROM payments WHERE kind='session' AND date>=?").get(start).s;
   const subrev = db.prepare("SELECT COALESCE(SUM(amount),0) s FROM payments WHERE kind='subscription' AND date>=?").get(start).s;
   const scount = db.prepare("SELECT COUNT(*) c FROM payments WHERE kind='session' AND date>=?").get(start).c;
-  const subcount = db.prepare("SELECT COUNT(*) c FROM payments WHERE kind='subscription' AND date>=?").get(start).c;
+  // Excludes balance_payment=1: collecting an old balance is real revenue (counted
+  // in subrev) but isn't a new subscribe/renew event, so it shouldn't inflate "Subscribed today".
+  const subcount = db.prepare("SELECT COUNT(*) c FROM payments WHERE kind='subscription' AND balance_payment=0 AND date>=?").get(start).c;
   return {
     entries: memberEntries + guestEntries,   // walk-in free sessions count as entries too
     sessionRevenue: srev, subscriptionRevenue: subrev,
@@ -256,11 +258,13 @@ function updateSettings(db, { body, user }) {
   return { pricing };
 }
 
-// Today's subscribers — one entry per subscription payment dated today, newest first.
+// Today's subscribers — one entry per subscribe/renew payment dated today, newest
+// first. Excludes balance_payment=1: paying off an old balance isn't a fresh
+// subscribe/renew, so it shouldn't re-list the member here.
 function liveSubscribedToday(db) {
   const start = dayStart();
   const rows = db.prepare(
-    "SELECT amount, method, date, member_id FROM payments WHERE kind='subscription' AND date>=? ORDER BY date DESC",
+    "SELECT amount, method, date, member_id FROM payments WHERE kind='subscription' AND balance_payment=0 AND date>=? ORDER BY date DESC",
   ).all(start);
   const out = [];
   for (const r of rows) {
@@ -568,9 +572,17 @@ function renewMember(db, { params, body, user }) {
   }
   if (body.applyPlan) {
     // Renew the weekly plan for the new period: set the quota outright (NULL ⇒ unlimited).
+    // Carry forward any owed sessions (sessions_left went negative — the club let
+    // the member train past their quota) by deducting the debt from the new block
+    // instead of silently forgiving it. Going unlimited (total null) clears any
+    // debt — an unlimited plan never meters sessions, so there'd be no way to
+    // work it off.
     const total = body.sessionsTotal ?? null;
-    db.prepare('UPDATE members SET sessions_total=?, sessions_left=? WHERE id=?').run(total, total, id);
+    const owed = Math.min(0, m.sessions_left ?? 0);
+    const newLeft = total == null ? null : total + owed;
+    db.prepare('UPDATE members SET sessions_total=?, sessions_left=? WHERE id=?').run(total, newLeft, id);
     parts.push(total == null ? 'unlimited access' : `${total} sessions`);
+    if (owed) parts.push(`${-owed} owed session(s) carried over`);
   } else if (body.sessions) {
     db.prepare('UPDATE members SET sessions_total=COALESCE(sessions_total,0)+?, sessions_left=COALESCE(sessions_left,0)+? WHERE id=?')
       .run(body.sessions, body.sessions, id);
@@ -609,11 +621,37 @@ function payBalance(db, { params, body, user }) {
   const amount = Math.min(m.balance, Math.max(0, requested));
   if (!amount) throw new HttpError(400, 'Enter an amount greater than zero');
   db.prepare('UPDATE members SET balance=balance-? WHERE id=?').run(amount, id);
-  db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
+  db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,balance_payment) VALUES (?,?,?,?,?,?,1)')
     .run(id, amount, 'subscription', JSON.parse(m.sports)[0], 'Cash', iso(now));
   const left = m.balance - amount;
   logActivity(db, user.id, 'member.balance', m.name,
     `Collected ${amount} DZD from ${m.name}` + (left ? ` — ${left} DZD still owed` : ' — balance cleared'));
+  return memberRowToDict(db, getMember(db, id));
+}
+
+// Collect (part of) a member's owed sessions (sessions_left negative — the club
+// let them train past their quota) directly, without waiting for their next
+// renewal. Staff types both the session count being settled and the price
+// collected — a one-off reconciliation, not tied to any configured session rate.
+function collectSessions(db, { params, body, user }) {
+  const id = Number(params[0]);
+  const m = getMember(db, id);
+  const owed = m.sessions_left < 0 ? -m.sessions_left : 0;
+  if (!owed) throw new HttpError(400, 'No owed sessions to collect');
+  // Default to clearing every owed session; cap a larger amount at what is owed.
+  const requested = body.sessions != null ? Math.round(Number(body.sessions)) : owed;
+  const sessions = Math.min(owed, Math.max(0, requested));
+  if (!sessions) throw new HttpError(400, 'Enter a number of sessions greater than zero');
+  const amount = Math.max(0, Math.round(Number(body.amount) || 0));
+  db.prepare('UPDATE members SET sessions_left=sessions_left+? WHERE id=?').run(sessions, id);
+  if (amount) {
+    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
+      .run(id, amount, 'session', JSON.parse(m.sports)[0], 'Cash', iso(new Date()));
+  }
+  const left = owed - sessions;
+  logActivity(db, user.id, 'member.sessions', m.name,
+    `Collected ${sessions} owed session(s) from ${m.name}`
+    + (amount ? ` (${amount} DZD)` : '') + (left ? ` — ${left} session(s) still owed` : ' — session debt cleared'));
   return memberRowToDict(db, getMember(db, id));
 }
 
@@ -864,24 +902,20 @@ function panelMemberGrowth(db, after, before) {
   return out;
 }
 
-// Members who trained (had an entry) within [after, before], counted per sport.
-function panelActiveBySport(db, after, before) {
-  const { clause, args } = whereRange('entry_time', after, before, 'member_id IS NOT NULL');
-  const rows = db.prepare(
-    `SELECT m.sports sports FROM members m WHERE m.id IN (SELECT DISTINCT member_id FROM entries ${clause})`,
-  ).all(...args);
-  const SPORTS = ['GYM', 'JUDO', 'WRESTLING', 'CARDIO'];
-  const counts = Object.fromEntries(SPORTS.map((s) => [s, 0]));
-  rows.forEach((r) => {
-    let arr = [];
-    try { arr = JSON.parse(r.sports) || []; } catch { arr = []; }
-    arr.forEach((s) => { if (counts[s] !== undefined) counts[s] += 1; });
-  });
-  return SPORTS.map((s) => ({
-    label: s[0] + s.slice(1, 4).toLowerCase(),
-    value: counts[s],
-    color: `var(--${s === 'GYM' ? 'accent' : s.toLowerCase()})`,
-  }));
+// A single calendar day's revenue, broken down into the three payment kinds
+// (not a full transaction list — too noisy for a busy day). Mirrors the
+// unfiltered (all kinds) sum used by the "Revenue this day" KPI.
+function panelRevenueByDay(db, day) {
+  const d = day || iso(new Date()).slice(0, 10);
+  const after = `${d}T00:00:00`;
+  const before = `${d}T23:59:59`;
+  const sumKind = (kind) => db.prepare(
+    'SELECT COALESCE(SUM(amount),0) s FROM payments WHERE date>=? AND date<=? AND kind=?',
+  ).get(after, before, kind).s;
+  const sessions = sumKind('session');
+  const subscriptions = sumKind('subscription');
+  const insurance = sumKind('insurance');
+  return { day: d, total: sessions + subscriptions + insurance, sessions, subscriptions, insurance };
 }
 
 // Entries-by-hour×day heatmap (08h–22h, 15 cols) over [after, before].
@@ -914,7 +948,7 @@ function statsPanel(db, { query = {} }) {
   switch (query.metric) {
     case 'revenueBySport': return { data: panelRevenueBySport(db, after, before) };
     case 'memberGrowth': return { data: panelMemberGrowth(db, after, before) };
-    case 'activeBySport': return { data: panelActiveBySport(db, after, before) };
+    case 'revenueByDay': return { data: panelRevenueByDay(db, query.day) };
     case 'heatmap': return { data: panelHeatmap(db, after, before) };
     case 'topVisitors': return { data: panelTopVisitors(db, after, before) };
     default: throw new HttpError(400, 'Unknown metric');
@@ -1498,6 +1532,7 @@ const ROUTES = [
   { m: 'DELETE', re: /^\/members\/(\d+)$/, auth: true, fn: deleteMember },
   { m: 'POST', re: /^\/members\/(\d+)\/renew$/, auth: true, fn: renewMember },
   { m: 'POST', re: /^\/members\/(\d+)\/pay-balance$/, auth: true, fn: payBalance },
+  { m: 'POST', re: /^\/members\/(\d+)\/collect-sessions$/, auth: true, fn: collectSessions },
   { m: 'POST', re: /^\/members\/(\d+)\/insurance$/, auth: true, fn: payInsurance },
   { m: 'GET', re: /^\/members\/(\d+)\/entries$/, fn: memberEntries },
   { m: 'GET', re: /^\/stats$/, fn: stats },

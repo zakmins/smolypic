@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { AppCtx } from '../App.jsx';
 import { Avatar } from '../components/atoms.jsx';
 import { LineChart, BarChart, Donut, Heatmap } from '../charts/Charts.jsx';
-import { dzd, dayKey, memberStatus } from '../utils.js';
+import { dzd, dayKey, memberStatus, fmtDate } from '../utils.js';
 import { api } from '../api.js';
 import { useT } from '../i18n.jsx';
 import DatePicker from '../components/DatePicker.jsx';
@@ -30,6 +30,21 @@ function usePanelData(metric, initialFrom, initialTo) {
     return () => { alive = false; };
   }, [metric, from, to]);
   return { from, to, setFrom, setTo, data };
+}
+
+// One calendar day's full payment breakdown, refetched whenever the picked day
+// changes — powers the "Revenue on a day" panel (pick a day, see exactly what it made).
+function useDayRevenue(initialDay) {
+  const [day, setDay] = useState(initialDay);
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    setData(null);
+    api(`/stats/panel?${new URLSearchParams({ metric: 'revenueByDay', day }).toString()}`)
+      .then((r) => { if (alive) setData(r.data); }).catch(() => { if (alive) setData(null); });
+    return () => { alive = false; };
+  }, [day]);
+  return { day, setDay, data };
 }
 
 // Compact before/after date pickers pinned to the right of a panel title.
@@ -60,9 +75,9 @@ export default function Statistics() {
   // the windows these panels used before the filter (YTD / last 60 / last 30 days).
   const revBySport = usePanelData('revenueBySport', yearStartKey(), ymd(new Date()));
   const memberGrowth = usePanelData('memberGrowth', yearStartKey(), ymd(new Date()));
-  const activeBySport = usePanelData('activeBySport', yearStartKey(), ymd(new Date()));
   const peakHours = usePanelData('heatmap', daysAgoKey(60), ymd(new Date()));
   const topVisitors = usePanelData('topVisitors', daysAgoKey(30), ymd(new Date()));
+  const dayRevenue = useDayRevenue(ymd(new Date()));
 
   const load = useCallback(() => {
     setError(null);
@@ -104,13 +119,14 @@ export default function Statistics() {
     months: { sub: t('this year'), interval: 0, labels: REVENUE_MONTHLY.map((m) => m.month), data: REVENUE_MONTHLY.map((m) => m.value), tips: REVENUE_MONTHLY.map((m) => m.tip) },
   };
   const revTrend = revViews[revGran];
-  const INACTIVE = stats.inactive;
   // Member revenue (subscriptions + sessions) collected in the current calendar
   // month — bucketed by month, so it naturally resets to 0 when a new month
   // begins. Stock sales never touch the payments table, so this is members-only.
   const monthIdx = new Date().getMonth();
   const MONTH_REVENUE = REVENUE_MONTHLY[monthIdx]?.value || 0;
   const MONTH_LABEL = `${REVENUE_MONTHLY[monthIdx]?.month} ${new Date().getFullYear()}`;
+  // revenueDaily30 covers the last 30 days ending today, so its last entry is today.
+  const DAY_REVENUE = REVENUE_DAILY30[REVENUE_DAILY30.length - 1]?.value || 0;
   // Members with a still-valid membership (not expired / out of sessions).
   const ACTIVE = members.filter((m) => memberStatus(m) !== 'expired');
 
@@ -139,14 +155,14 @@ export default function Statistics() {
           <div className="sub">{MONTH_LABEL}</div>
         </div>
         <div className="stat-card">
+          <div className="k">{t('Revenue this day')}</div>
+          <div className="v mono">{dzd(DAY_REVENUE)}</div>
+          <div className="sub">{t('today')}</div>
+        </div>
+        <div className="stat-card">
           <div className="k">{t('Active members')}</div>
           <div className="v" style={{ color: 'var(--green)' }}>{ACTIVE.length}</div>
           <div className="sub">{t('with a valid membership')}</div>
-        </div>
-        <div className="stat-card">
-          <div className="k">{t('Inactive 90+ days')}</div>
-          <div className="v" style={{ color: INACTIVE.length ? 'var(--amber)' : 'var(--green)' }}>{INACTIVE.length}</div>
-          <div className="sub">{t('worth a phone call this week')}</div>
         </div>
       </div>
 
@@ -222,11 +238,47 @@ export default function Statistics() {
 
         <div className="panel">
           <div className="panel-head">
-            <div className="panel-title">{t('Active members by sport')}</div>
-            <RangeFilter panel={activeBySport} />
+            <div className="panel-title">{t('Revenue on a day')}</div>
+            <div className="range-filter">
+              <DatePicker value={dayRevenue.day} onChange={(v) => dayRevenue.setDay(v || ymd(new Date()))}
+                ariaLabel={t('Pick a day')} width={140} />
+            </div>
           </div>
           <div className="panel-body">
-            {activeBySport.data ? <BarChart data={activeBySport.data} height={200} /> : <PanelLoading />}
+            {!dayRevenue.data ? <PanelLoading /> : (
+              <>
+                <div style={{ textAlign: 'center', padding: '10px 0 18px' }}>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 34, fontWeight: 800 }}>{dzd(dayRevenue.data.total)}</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>
+                    {t('Revenue on {date}', { date: fmtDate(dayRevenue.day) })}
+                  </div>
+                </div>
+                {dayRevenue.data.total === 0 ? (
+                  <div className="empty-state" style={{ padding: '10px 0' }}>{t('No payments that day.')}</div>
+                ) : (
+                  <div style={{ display: 'grid', gap: 14 }}>
+                    {[
+                      { label: t('Sessions'), value: dayRevenue.data.sessions, color: 'var(--accent)' },
+                      { label: t('Memberships'), value: dayRevenue.data.subscriptions, color: 'var(--green)' },
+                      { label: t('Insurance'), value: dayRevenue.data.insurance, color: 'var(--wrestling)' },
+                    ].map((row) => (
+                      <div key={row.label}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: 5 }}>
+                          <span style={{ fontWeight: 600, fontSize: 13.5 }}>{row.label}</span>
+                          <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 13.5, fontWeight: 700 }}>{dzd(row.value)}</span>
+                        </div>
+                        <div className="progress">
+                          <div style={{
+                            width: `${dayRevenue.data.total ? Math.round((row.value / dayRevenue.data.total) * 100) : 0}%`,
+                            background: row.color,
+                          }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
 

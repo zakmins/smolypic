@@ -47,7 +47,9 @@ CREATE TABLE IF NOT EXISTS payments (
   sport TEXT,                       -- primary sport at payment time, for revenue-by-sport
   method TEXT,
   date TEXT NOT NULL,
-  walk_in INTEGER NOT NULL DEFAULT 0 -- 1 ⇒ anonymous "+ Session" drop-in (never a member)
+  walk_in INTEGER NOT NULL DEFAULT 0, -- 1 ⇒ anonymous "+ Session" drop-in (never a member)
+  balance_payment INTEGER NOT NULL DEFAULT 0 -- 1 ⇒ collecting a previously-recorded balance
+                                              -- (still real revenue, but not a new subscribe/renew event)
 );
 CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(date);
 CREATE INDEX IF NOT EXISTS idx_payments_member ON payments(member_id);
@@ -346,6 +348,11 @@ function openDb(dbPath) {
     db.exec('ALTER TABLE payments ADD COLUMN walk_in INTEGER NOT NULL DEFAULT 0');
     db.exec("UPDATE payments SET walk_in=1 WHERE member_id IS NULL AND kind='session'");
   }
+  // Marks a payBalance collection so "Subscribed today" (started/renewed today)
+  // doesn't re-list a member just for paying off an old balance. Older databases
+  // predate the column; existing rows default to 0 (nothing to backfill — the
+  // old code never recorded which payments were balance collections).
+  ensureColumn(db, 'payments', 'balance_payment', 'INTEGER NOT NULL DEFAULT 0');
   return db;
 }
 
