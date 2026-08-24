@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Icons } from './atoms.jsx';
+import { zoomTransform } from './ZoomViewport.jsx';
 
 // Custom, theme-matched dropdown — a styled trigger + a portaled options list
 // (portaled so a scroll container can't clip it). Drop-in for a native <select>:
@@ -17,19 +18,25 @@ export default function Select({ value, onChange, options, ariaLabel, width, pla
   const current = opts.find((o) => o.value === value);
 
   // Place the fixed popover under the trigger (flip above if it'd overflow).
+  // The popover now renders inside the zoom canvas (see Portal.jsx via
+  // createPortal below), so a screen-space point from getBoundingClientRect()
+  // has to be converted into the canvas's local space before it's assigned as
+  // the popover's own left/top/bottom — see zoomTransform() in ZoomViewport.jsx.
   const place = () => {
     const t = triggerRef.current;
     if (!t) return;
     const r = t.getBoundingClientRect();
+    const { toLocal, scale, canvasHeight } = zoomTransform();
     const wanted = Math.min(300, opts.length * 38 + 10);
     const below = window.innerHeight - r.bottom - 8;
     const above = r.top - 8;
-    const up = below < wanted && above > below;
+    const up = below < wanted * scale && above > below;
+    const anchor = toLocal(r.left, up ? r.top - 5 : r.bottom + 5);
     setPos({
-      left: r.left, minW: r.width,
-      top: up ? undefined : r.bottom + 5,
-      bottom: up ? window.innerHeight - r.top + 5 : undefined,
-      maxH: Math.max(120, Math.min(wanted, (up ? above : below) - 5)),
+      left: anchor.x, minW: r.width / scale,
+      top: up ? undefined : anchor.y,
+      bottom: up ? canvasHeight - anchor.y : undefined,
+      maxH: Math.max(120, Math.min(wanted, ((up ? above : below) - 5) / scale)),
     });
   };
 
@@ -76,7 +83,7 @@ export default function Select({ value, onChange, options, ariaLabel, width, pla
         </button>
       ))}
     </div>,
-    document.body,
+    document.querySelector('.zoom-canvas') || document.body,
   );
 
   return (

@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Icons } from './atoms.jsx';
+import { zoomTransform } from './ZoomViewport.jsx';
 import { fmtDate, dayKey } from '../utils.js';
 import { useT } from '../i18n.jsx';
 
@@ -35,15 +36,21 @@ export default function DatePicker({ value, onChange, placeholder = 'Any date', 
   };
 
   // Place the fixed popover under the trigger (flip above if it'd overflow).
+  // The popover renders inside the zoom canvas, so the final screen-space
+  // anchor point is converted into the canvas's local space — see
+  // zoomTransform() in ZoomViewport.jsx.
   const place = () => {
     const t = triggerRef.current;
     if (!t) return;
     const r = t.getBoundingClientRect();
+    const { toLocal, scale } = zoomTransform();
     const W = 272, H = 326, gap = 6;
-    let left = Math.max(8, Math.min(r.left, window.innerWidth - W - 8));
-    let top = r.bottom + gap;
-    if (top + H > window.innerHeight - 8) top = Math.max(8, r.top - H - gap);
-    setPos({ top, left });
+    const screenW = W * scale, screenH = H * scale, screenGap = gap * scale;
+    let left = Math.max(8, Math.min(r.left, window.innerWidth - screenW - 8));
+    let top = r.bottom + screenGap;
+    if (top + screenH > window.innerHeight - 8) top = Math.max(8, r.top - screenH - screenGap);
+    const local = toLocal(left, top);
+    setPos({ top: local.y, left: local.x });
   };
 
   useLayoutEffect(() => {
@@ -154,7 +161,7 @@ export default function DatePicker({ value, onChange, placeholder = 'Any date', 
         {value && <button type="button" className="btn sm ghost" onClick={() => { onChange(''); setOpen(false); }}>{t('Clear')}</button>}
       </div>
     </div>,
-    document.body,
+    document.querySelector('.zoom-canvas') || document.body,
   );
 
   return (

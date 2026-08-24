@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { AppCtx } from '../App.jsx';
+import Portal from './Portal.jsx';
 import { useT } from '../i18n.jsx';
 import { dzd } from '../utils.js';
 
@@ -29,7 +29,8 @@ export default function FreeSessionModal({ onClose, onAdd }) {
     onAdd(name.trim(), amount);
   };
 
-  return createPortal(
+  return (
+    <Portal>
     <div className="modal-center" onClick={onClose}>
       <div className="modal" style={{ width: 460 }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('Add session')}>
         <div className="modal-head">
@@ -68,7 +69,7 @@ export default function FreeSessionModal({ onClose, onAdd }) {
           <button className="btn primary" onClick={submit} disabled={!(amount > 0)}>{t('Add session')}</button>
         </div>
       </div>
-    </div>,
-    document.body,
+    </div>
+    </Portal>
   );
 }

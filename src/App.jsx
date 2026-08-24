@@ -242,9 +242,9 @@ function Dashboard() {
       buf = '';
       if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
       if (uid.length < MIN_LEN) return;
-      // If an RFID-capture field is focused (assigning a tag to a member), drop the
-      // UID into it — this is tag *assignment*, not an entrance: no IN/OUT, no
-      // session change. Otherwise it's a normal entrance swipe.
+      // If an RFID-capture field is focused (assigning a tag to a member, or the
+      // members search bar), drop the UID into it instead of treating the scan as
+      // an entrance: no IN/OUT, no session change. Otherwise it's a normal swipe.
       const el = document.activeElement;
       if (el && el.matches && el.matches('input[data-rfid-capture]')) {
         const setVal = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
@@ -510,12 +510,12 @@ function Dashboard() {
           </div>
         </div>
       </div>
-      </ZoomViewport>
       {popupQueue.length > 0 && (
         <SwipePopup event={popupQueue[0]} queued={popupQueue.length - 1} onDismiss={dismissPopup}
           onViewMember={(id) => { setFocusMemberId(id); setRoute('customers'); dismissPopup(); }} />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
+      </ZoomViewport>
     </AppCtx.Provider>
   );
 }

@@ -1,10 +1,12 @@
 import { createPortal } from 'react-dom';
 
-// Renders its children into <body>, outside the app's zoom canvas. A
-// position:fixed overlay is anchored to the nearest transformed ancestor, so
-// when the shell is zoomed (see ZoomViewport.jsx) an inline modal/drawer would
-// drift and scale with the zoom. Portaling to <body> escapes that transform so
-// backdrops and dialogs always sit against the real viewport, zoomed or not.
+// Renders its children into .zoom-canvas (see ZoomViewport.jsx), falling back
+// to <body> if the canvas isn't mounted yet (e.g. the login screen). Portaling
+// still escapes whatever scrollable/overflow-hidden container the trigger
+// lives in, but staying inside the canvas means backdrops and dialogs zoom and
+// pan along with the rest of the app instead of sitting fixed against the real
+// viewport.
 export default function Portal({ children }) {
-  return createPortal(children, document.body);
+  const target = document.querySelector('.zoom-canvas') || document.body;
+  return createPortal(children, target);
 }

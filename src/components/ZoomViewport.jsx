@@ -9,15 +9,36 @@ import React, { useEffect, useRef } from 'react';
 // translate), and clamp the pan so the canvas always covers the viewport (no
 // empty margins). Scale floor is 1 so "dezoom" lands exactly back at rest.
 //
-// At rest (scale 1) we set transform:none so the canvas is NOT a containing
-// block — that keeps the app's many position:fixed modals/drawers anchored to
-// the real viewport. They only shift if a modal is opened while already zoomed,
-// which is the rare case; everything outside the canvas (toast, swipe popup)
-// stays correct always.
+// Everything the operator can see — pages, modals/drawers/popups (Portal.jsx),
+// the swipe popup, the toast — lives inside .zoom-canvas so it all zooms and
+// pans together. .zoom-canvas has `will-change: transform`, which per spec
+// makes it the containing block for its position:fixed descendants even at
+// rest (transform: none), so this was already true structurally; the pieces
+// that used to escape did so by portaling to <body> instead. Portal.jsx now
+// targets the canvas. Anchored popovers (Select, DatePicker) compute their
+// position from a trigger's getBoundingClientRect(), which returns real
+// *screen* pixels — since they now render inside the transformed canvas, that
+// point has to be converted into the canvas's local (pre-transform) space via
+// zoomTransform() below, or the ambient zoom would be applied to it twice.
 
 const MIN = 1;
 const MAX = 4;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+// Live screen ↔ canvas-local conversion, read straight off the DOM so callers
+// don't need to subscribe to the zoom state (which changes every animation
+// frame and isn't kept in React state for that reason).
+export function zoomTransform() {
+  const canvas = document.querySelector('.zoom-canvas');
+  if (!canvas) return { toLocal: (x, y) => ({ x, y }), scale: 1, canvasHeight: window.innerHeight };
+  const m = new DOMMatrix(getComputedStyle(canvas).transform);
+  const inv = m.inverse();
+  return {
+    toLocal: (x, y) => { const p = inv.transformPoint(new DOMPoint(x, y)); return { x: p.x, y: p.y }; },
+    scale: m.a || 1,
+    canvasHeight: canvas.clientHeight,
+  };
+}
 
 export default function ZoomViewport({ children }) {
   const viewportRef = useRef(null);

@@ -99,7 +99,7 @@ export default function Customers() {
       </div>
 
       <div className="toolbar">
-        <input type="search" placeholder={t('Search name, phone or RFID tag…')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search members')} />
+        <input data-rfid-capture type="search" placeholder={t('Search name, phone or RFID tag…')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search members')} />
         <Select value={gender} onChange={setGender} ariaLabel={t('Filter by gender')}
           options={[['all', t('All genders')], ['M', t('Male')], ['F', t('Female')]]} />
         <Select value={sport} onChange={setSport} ariaLabel={t('Filter by sport')}
