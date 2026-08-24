@@ -7,7 +7,7 @@ import { useAuth } from '../auth.jsx';
 import FreeSessionModal from './FreeSessionModal.jsx';
 
 export default function TopBar() {
-  const { presence, today, simulateSwipe, addGuestSession } = useContext(AppCtx);
+  const { presence, today, simulateSwipe, addGuestSession, setRoute, setOpenNewMember } = useContext(AppCtx);
   const { language, t } = useLanguage();
   const { currentUser, logout } = useAuth();
   const [now, setNow] = useState(new Date());
@@ -55,7 +55,10 @@ export default function TopBar() {
           </button>
         )}
         <button className="btn primary" onClick={() => setFreeSession(true)} title={t('Add a walk-in paid session to the floor')}>
-          <Icons.plus width="16" height="16" /> {t('Session')}
+          {t('Session')}
+        </button>
+        <button className="btn" onClick={() => { setRoute('customers'); setOpenNewMember(true); }} title={t('Register a new member')}>
+          {t('New member')}
         </button>
         <div className="top-divider" />
         {currentUser && (
@@ -69,7 +72,7 @@ export default function TopBar() {
             </div>
           </div>
         )}
-        <button className="icon-btn" onClick={logout} title={t('Sign out')} aria-label={t('Sign out')}>
+        <button className="icon-btn logout-btn" onClick={logout} title={t('Sign out')} aria-label={t('Sign out')}>
           <Icons.logout width="17" height="17" />
         </button>
       </div>

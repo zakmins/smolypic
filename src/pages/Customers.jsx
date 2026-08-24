@@ -26,7 +26,7 @@ const MEMBERS_PAGE_SIZE = 50;
 
 export default function Customers() {
   const t = useT();
-  const { members, presence, saveMember, renewMember, payInsurance, payBalance, deleteMember, focusMemberId, setFocusMemberId } = useContext(AppCtx);
+  const { members, presence, saveMember, renewMember, payInsurance, payBalance, deleteMember, checkInMember, focusMemberId, setFocusMemberId, openNewMember, setOpenNewMember } = useContext(AppCtx);
   const [q, setQ] = useState('');
   const [gender, setGender] = useState('all');
   const [sport, setSport] = useState('all');
@@ -47,10 +47,21 @@ export default function Customers() {
     }
   }, [focusMemberId, setFocusMemberId]);
 
+  // Opened from the navbar's "New member" button: pop the create form open here.
+  useEffect(() => {
+    if (openNewMember) {
+      setEditing('new');
+      setOpenNewMember(false);
+    }
+  }, [openNewMember, setOpenNewMember]);
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return members
-      .filter((m) => !needle || m.name.toLowerCase().includes(needle) || (m.phone || '').replace(/\s/g, '').includes(needle.replace(/\s/g, '')))
+      .filter((m) => !needle
+        || m.name.toLowerCase().includes(needle)
+        || (m.phone || '').replace(/\s/g, '').includes(needle.replace(/\s/g, ''))
+        || (m.rfidUid || '').toLowerCase().includes(needle))
       .filter((m) => gender === 'all' || m.gender === gender)
       .filter((m) => sport === 'all' || m.sports.includes(sport))
       .filter((m) => {
@@ -82,13 +93,10 @@ export default function Customers() {
           <div className="page-title">{t('Members')}</div>
           <div className="page-sub">{t('{n} registered · {shown} shown', { n: members.length, shown: filtered.length })}</div>
         </div>
-        <div style={{ marginLeft: 'auto' }}>
-          <button className="btn primary" onClick={() => setEditing('new')}><Icons.plus width="15" height="15" /> {t('New member')}</button>
-        </div>
       </div>
 
       <div className="toolbar">
-        <input type="search" placeholder={t('Search name or phone…')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search members')} />
+        <input type="search" placeholder={t('Search name, phone or RFID tag…')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search members')} />
         <Select value={gender} onChange={setGender} ariaLabel={t('Filter by gender')}
           options={[['all', t('All genders')], ['M', t('Male')], ['F', t('Female')]]} />
         <Select value={sport} onChange={setSport} ariaLabel={t('Filter by sport')}
@@ -162,6 +170,7 @@ export default function Customers() {
           onRenew={() => setRenewing(sel)}
           onCollect={() => setCollecting(sel)}
           onPayInsurance={payInsurance}
+          onCheckIn={checkInMember}
           onDelete={() => setConfirmDelete(sel)} />
       )}
       {editing && (
@@ -197,7 +206,7 @@ export default function Customers() {
   );
 }
 
-function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect, onPayInsurance, onDelete }) {
+function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect, onPayInsurance, onCheckIn, onDelete }) {
   const t = useT();
   const { pricing } = useContext(AppCtx);
   const insurancePrice = pricing?.insurance ?? INSURANCE_PRICE;
@@ -209,6 +218,7 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
     : Math.max(0, Math.min(100, (days / m.durationDays) * 100));
   const barClass = isGoldMember(m) ? 'gold' : pct <= 15 ? 'low' : pct <= 40 ? 'mid' : '';
   const insideNow = presence.some((p) => p.memberId === m.id);
+  const [confirmCheckIn, setConfirmCheckIn] = useState(false);
 
   const [visits, setVisits] = useState(null);
   const [page, setPage] = useState(1);
@@ -228,6 +238,7 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
   }, [onClose]);
 
   return (
+    <>
     <Portal>
     <div className="overlay" onClick={onClose}>
       <div className="drawer" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('{name} profile', { name: m.name })}>
@@ -238,7 +249,7 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
         <div className="modal-body">
           <div style={{ display: 'flex', gap: 18, alignItems: 'center', marginBottom: 18 }}>
             <Avatar member={m} size="lg" />
-            <div>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontFamily: 'var(--display)', fontWeight: 900, fontSize: 22 }}>{m.name}</div>
               <div className="live-meta" style={{ marginTop: 6 }}>
                 {m.sports.map((s) => <SportBadge key={s} sport={s} />)}
@@ -247,6 +258,12 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
                 {memberStatus(m) === 'expired' && <span className="badge red">{t('Expired')}</span>}
               </div>
             </div>
+            <button className="checkin-btn" disabled={insideNow}
+              onClick={() => setConfirmCheckIn(true)}
+              title={insideNow ? undefined : t('Check in')}
+              aria-label={insideNow ? t('Already on the floor') : t('Check in')}>
+              <Icons.swipe width="16" height="16" />
+            </button>
           </div>
 
           <div style={{ marginBottom: 18 }}>
@@ -353,6 +370,28 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
       </div>
     </div>
     </Portal>
+    {confirmCheckIn && (
+      <Portal>
+      <div className="modal-center" onClick={() => setConfirmCheckIn(false)}>
+        <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-head"><div className="modal-title">{t('Check in member')}</div></div>
+          <div className="modal-body">
+            {t('Check in ')}<strong>{m.name}</strong>{t('? This puts them on the floor immediately, exactly as if they had swiped their tag at the entrance.')}
+            {usesSessions && (
+              <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--amber)', fontWeight: 600 }}>
+                {t('This will deduct one session from their remaining balance ({left} left).', { left: m.sessionsLeft })}
+              </div>
+            )}
+          </div>
+          <div className="modal-foot">
+            <button className="btn ghost" onClick={() => setConfirmCheckIn(false)}>{t('Cancel')}</button>
+            <button className="btn primary" onClick={() => { onCheckIn(m.id, m.name); setConfirmCheckIn(false); }}>{t('Check in')}</button>
+          </div>
+        </div>
+      </div>
+      </Portal>
+    )}
+    </>
   );
 }
 

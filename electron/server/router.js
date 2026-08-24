@@ -393,6 +393,29 @@ function forceExit(db, { params, user }) {
   };
 }
 
+// Manually put a member on the floor without an RFID scan (e.g. a lost tag at
+// reception). Mirrors the "in" half of a real swipe: opens an entry, burns a
+// session on a metered plan, same effect on Currently Inside / stats.
+function checkIn(db, { params, user }) {
+  const id = Number(params[0]);
+  const m = getMember(db, id);
+  const open = db.prepare('SELECT * FROM entries WHERE member_id=? AND exit_time IS NULL').get(id);
+  if (open) throw new HttpError(400, 'Member is already inside');
+  const now = new Date();
+  db.prepare('INSERT INTO entries (member_id,entry_time,exit_time) VALUES (?,?,NULL)').run(id, iso(now));
+  if (m.membership_type === 'subscription' && m.sessions_total != null) {
+    // Metered subscription: burn a session from the quota, same as a real swipe.
+    db.prepare('UPDATE members SET sessions_left=sessions_left-1 WHERE id=?').run(id);
+  }
+  logActivity(db, user.id, 'member.check_in', m.name, `Manually checked in ${m.name}`);
+  return {
+    members: allMembers(db),
+    presence: presenceList(db),
+    exits: exitsList(db),
+    today: todayStats(db),
+  };
+}
+
 function guestSession(db, { body, user }) {
   const now = new Date();
   const name = (body.name || '').trim() || 'Walk-in';
@@ -1525,6 +1548,7 @@ const ROUTES = [
   { m: 'GET', re: /^\/live\/expiring-soon$/, fn: liveExpiringSoon },
   { m: 'POST', re: /^\/swipe$/, auth: true, fn: swipe },
   { m: 'POST', re: /^\/members\/(\d+)\/force-exit$/, auth: true, fn: forceExit },
+  { m: 'POST', re: /^\/members\/(\d+)\/check-in$/, auth: true, fn: checkIn },
   { m: 'POST', re: /^\/guest-session$/, auth: true, fn: guestSession },
   { m: 'DELETE', re: /^\/guest-session\/(\d+)$/, auth: true, fn: removeGuestSession },
   { m: 'POST', re: /^\/members$/, auth: true, fn: createMember },

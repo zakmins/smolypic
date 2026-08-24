@@ -216,7 +216,8 @@ export const FR = {
   // ── Members (Customers) ──
   "{n} registered · {shown} shown": "{n} inscrits · {shown} affichés",
   "New member": "Nouveau membre",
-  "Search name or phone…": "Rechercher nom ou téléphone…",
+  "Register a new member": "Inscrire un nouveau membre",
+  "Search name, phone or RFID tag…": "Rechercher nom, téléphone ou tag RFID…",
   "Search members": "Rechercher des membres",
   "Filter by gender": "Filtrer par sexe",
   "All genders": "Tous les sexes",
@@ -253,6 +254,14 @@ export const FR = {
   "Keep member": "Conserver le membre",
   "{name} profile": "Profil de {name}",
   "Member profile": "Profil du membre",
+  "Check in": "Enregistrer l'entrée",
+  "Already on the floor": "Déjà sur le tapis",
+  "Check in member": "Enregistrer l'entrée du membre",
+  "Check in ": "Enregistrer l'entrée de ",
+  "? This puts them on the floor immediately, exactly as if they had swiped their tag at the entrance.": " ? Il/elle sera immédiatement ajouté(e) au tapis, exactement comme s'il/elle avait badgé à l'entrée.",
+  "This will deduct one session from their remaining balance ({left} left).": "Cela déduira une séance de son solde restant ({left} restantes).",
+  "Checked in — {name}": "Entrée enregistrée — {name}",
+  "Could not check in: {msg}": "Impossible d'enregistrer l'entrée : {msg}",
   "Sessions remaining": "Séances restantes",
   "Subscription progress": "Progression de l'abonnement",
   " — club owes {n}": " — le club doit {n}",
@@ -689,6 +698,7 @@ export const FR = {
   "SUBSCRIPTION EXPIRED — contact staff": "ABONNEMENT EXPIRÉ — contacter le personnel",
   "Subscription ends in {days} day": "L'abonnement se termine dans {days} jour",
   "Subscription ends in {days} days": "L'abonnement se termine dans {days} jours",
+  "View full profile": "Voir le profil complet",
   "Welcome back": "Bon retour",
 
   // ── Date picker ──

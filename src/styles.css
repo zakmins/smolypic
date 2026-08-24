@@ -35,7 +35,7 @@
 
   --shadow-card: 0 1px 0 rgba(255,255,255,0.03) inset, 0 10px 30px rgba(0, 0, 0, 0.28);
   --shadow-pop: 0 30px 90px rgba(0, 0, 0, 0.65);
-  --overlay: rgba(4, 8, 6, 0.66);
+  --overlay: rgba(0, 0, 0, 0.66);
   --tooltip-bg: #16201B;
 }
 
@@ -71,7 +71,7 @@
 
   --shadow-card: 0 1px 2px rgba(12, 25, 20, 0.05), 0 8px 24px rgba(12, 25, 20, 0.06);
   --shadow-pop: 0 30px 90px rgba(12, 25, 20, 0.25);
-  --overlay: rgba(10, 20, 16, 0.42);
+  --overlay: rgba(0, 0, 0, 0.42);
   --tooltip-bg: #0E1512;
 }
 
@@ -276,8 +276,8 @@ input::placeholder { color: var(--faint); }
 .top-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 
 .btn {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 9px 16px; border-radius: var(--r-sm);
+  display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 9px 16px; border-radius: var(--r-sm); white-space: nowrap;
   font-weight: 700; font-size: 13px;
   background: var(--raised); border: 1px solid var(--line-strong);
   transition: filter 0.12s, background 0.12s, transform 0.1s, box-shadow 0.15s;
@@ -400,7 +400,7 @@ input::placeholder { color: var(--faint); }
 }
 @keyframes slam { from { transform: scale(1.1) translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 .swipe-band { height: 7px; }
-.swipe-band.in { background: var(--grad); }
+.swipe-band.in { background: linear-gradient(115deg, var(--green), #34D399); }
 .swipe-band.out { background: linear-gradient(115deg, var(--red), #FF7A5C); }
 .swipe-band.unknown { background: linear-gradient(115deg, var(--amber), #FF8A3C); }
 .swipe-band.gold { background: linear-gradient(115deg, var(--gold), #FFA500); }
@@ -425,6 +425,33 @@ input::placeholder { color: var(--faint); }
 .swipe-queue-hint {
   position: absolute; bottom: 15px; right: 20px;
   font-family: var(--mono); font-size: 11px; color: var(--faint);
+}
+/* Full-width, sports-jersey-striped CTA that closes the popup and jumps to the
+   member's profile — color-matches the swipe-band (green in / red out / gold VIP). */
+.swipe-cta {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; padding: 16px 28px; border: none; border-top: 1px solid var(--line);
+  font-family: var(--display); font-weight: 900; font-style: italic; font-size: 15px;
+  letter-spacing: 0.03em; text-transform: uppercase;
+  cursor: pointer; position: relative; overflow: hidden;
+  transition: filter 0.15s, transform 0.1s;
+}
+.swipe-cta::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(115deg, rgba(255,255,255,0.1) 0 14px, transparent 14px 28px);
+}
+.swipe-cta > * { position: relative; z-index: 1; }
+.swipe-cta:hover { filter: brightness(1.08); }
+.swipe-cta:active { transform: translateY(1px); }
+.swipe-cta.in { background: linear-gradient(115deg, var(--green), #34D399); color: #fff; }
+.swipe-cta.out { background: linear-gradient(115deg, var(--red), #FF7A5C); color: #fff; }
+.swipe-cta.gold { background: linear-gradient(115deg, var(--gold), #FFA500); color: #241a00; }
+.swipe-cta-arrow { flex-shrink: 0; transition: transform 0.15s; }
+.swipe-cta:hover .swipe-cta-arrow { transform: translateX(5px); }
+.swipe-cta-queue {
+  position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+  font-family: var(--mono); font-weight: 700; font-size: 10px; text-transform: none; letter-spacing: normal;
+  background: rgba(0, 0, 0, 0.22); color: #fff; padding: 3px 9px; border-radius: 999px;
 }
 
 /* ── Tables ── */
@@ -512,6 +539,20 @@ input::placeholder { color: var(--faint); }
 .kv .k { color: var(--muted); font-weight: 600; }
 .kv .v { font-weight: 700; }
 .kv .v.mono { font-family: var(--mono); font-weight: 500; }
+
+/* ── Check-in button (member drawer name row) ── */
+.checkin-btn {
+  flex: none; margin-left: auto; width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center; border: none; cursor: pointer;
+  background: var(--grad); color: var(--on-accent);
+  transition: filter 0.15s, transform 0.1s, background 0.15s, color 0.15s;
+}
+.checkin-btn:hover { filter: brightness(1.08); }
+.checkin-btn:active { transform: scale(0.94); }
+.checkin-btn:disabled {
+  background: var(--panel-2); color: var(--faint); border: 1px solid var(--line-strong);
+  cursor: not-allowed; filter: none; transform: none;
+}
 
 /* ── Insurance card (member drawer) ── */
 .ins-card { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel-2); }
@@ -884,6 +925,7 @@ input::placeholder { color: var(--faint); }
 .topuser-meta { line-height: 1.2; }
 .topuser-name { font-weight: 800; font-size: 13px; }
 .topuser-role { font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.logout-btn:hover { color: var(--red); background: var(--red-soft); }
 
 /* ── Color picker / swatches (Manage users) ── */
 .color-picker { display: flex; align-items: center; gap: 10px; }

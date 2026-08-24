@@ -5,7 +5,7 @@ import { useT } from '../i18n.jsx';
 
 /* The card stays on screen until the operator dismisses it (click ×, the
    overlay, or press Esc). Back-to-back swipes queue behind it. */
-export default function SwipePopup({ event, queued, onDismiss }) {
+export default function SwipePopup({ event, queued, onDismiss, onViewMember }) {
   const t = useT();
   const { kind, member } = event;
 
@@ -102,7 +102,12 @@ export default function SwipePopup({ event, queued, onDismiss }) {
             <Icons.warn width="18" height="18" /> {days === 1 ? t('Subscription ends in {days} day', { days }) : t('Subscription ends in {days} days', { days })}
           </div>
         )}
-        {queued > 0 && <div className="swipe-queue-hint">{t('+{queued} waiting', { queued })}</div>}
+        <button type="button" className={`swipe-cta ${gold ? 'gold' : entering ? 'in' : 'out'}`}
+          onClick={() => onViewMember(member.id)}>
+          <span>{t('View full profile')}</span>
+          <Icons.arrow className="swipe-cta-arrow" width="16" height="16" />
+          {queued > 0 && <span className="swipe-cta-queue">{t('+{queued} waiting', { queued })}</span>}
+        </button>
       </div>
     </div>
   );

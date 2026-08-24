@@ -95,6 +95,9 @@ function Dashboard() {
   // Cross-page focus: set a member id here, switch to the Members page, and
   // Customers.jsx opens that member's drawer (then clears it).
   const [focusMemberId, setFocusMemberId] = useState(null);
+  // Cross-page trigger: the navbar's "New member" button flips this, switches to
+  // the Members page, and Customers.jsx opens the create form (then clears it).
+  const [openNewMember, setOpenNewMember] = useState(false);
 
   // ── Swipe popup queue: stays until the operator dismisses it ──
   const [popupQueue, setPopupQueue] = useState([]);
@@ -182,6 +185,19 @@ function Dashboard() {
     }
   }, [showToast]);
 
+  // Manually put a member on the floor without an RFID scan (e.g. a lost tag at
+  // reception). Mirrors a real "in" swipe: opens an entry, burns a session on a
+  // metered plan, updates the Currently Inside count.
+  const checkInMember = useCallback(async (memberId, name) => {
+    try {
+      const d = await api(`/members/${memberId}/check-in`, { method: 'POST' });
+      setMembers(d.members); setPresence(d.presence); setExits(d.exits); setToday(d.today);
+      showToast('Checked in — {name}', { name });
+    } catch (e) {
+      showToast('Could not check in: {msg}', { msg: e.message });
+    }
+  }, [showToast]);
+
   // Demo simulator — picks a random member (occasionally an unknown tag) and
   // *emulates a real reader*: it "types" the UID as a fast burst of AZERTY
   // keystrokes (CAPS LOCK off) ending in Enter, exactly like the HID hardware.
@@ -192,7 +208,7 @@ function Dashboard() {
     let uid;
     if (!firstSwipeDone.current) {
       firstSwipeDone.current = true;
-      uid = '9087058';                                  // Wissam Elam — first test scan, so the gold styling is easy to check
+      uid = '0009087058';                               // Wissam Elam — first test scan, so the gold styling is easy to check
     } else {
       const unknown = Math.random() < 0.08;
       uid = unknown || members.length === 0
@@ -431,21 +447,21 @@ function Dashboard() {
   const ctx = useMemo(() => ({
     members, presence, exits, today, stock, stockLog, consumed, pricing,
     saveMember, renewMember, payInsurance, payBalance, collectSessions, deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing,
-    savePreferences, simulateSwipe, handleSwipe, addGuestSession, removeGuestSession, forceExitMember, showToast,
-    daysRemaining, memberStatus, setRoute, focusMemberId, setFocusMemberId,
+    savePreferences, simulateSwipe, handleSwipe, addGuestSession, removeGuestSession, forceExitMember, checkInMember, showToast,
+    daysRemaining, memberStatus, setRoute, focusMemberId, setFocusMemberId, openNewMember, setOpenNewMember,
   }), [members, presence, exits, today, stock, stockLog, consumed, pricing, saveMember, renewMember, payInsurance, payBalance, collectSessions,
        deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing, savePreferences, simulateSwipe, handleSwipe,
-       addGuestSession, removeGuestSession, forceExitMember, showToast, focusMemberId]);
+       addGuestSession, removeGuestSession, forceExitMember, checkInMember, showToast, focusMemberId, openNewMember]);
 
   const pages = {
     live: LiveStatus, customers: Customers, judo: Judo, wrestling: Wrestling,
     stock: StockManagement, 'stock-inventory': StockInventory,
-    'members-reports': MembersReports,
     settings: Settings,
   };
   if (currentUser.role === 'admin') {
     pages.users = Users;               // Manage users is admin-only
     pages.stats = Statistics;          // Members Dashboard is admin-only
+    pages['members-reports'] = MembersReports;   // Reports is admin-only
     pages['stock-dashboard'] = StockDashboard;   // Stock Dashboard is admin-only
   }
   const Page = pages[route] || LiveStatus;                   // never render a gated page to a coach
@@ -478,7 +494,8 @@ function Dashboard() {
       </div>
       </ZoomViewport>
       {popupQueue.length > 0 && (
-        <SwipePopup event={popupQueue[0]} queued={popupQueue.length - 1} onDismiss={dismissPopup} />
+        <SwipePopup event={popupQueue[0]} queued={popupQueue.length - 1} onDismiss={dismissPopup}
+          onViewMember={(id) => { setFocusMemberId(id); setRoute('customers'); dismissPopup(); }} />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
     </AppCtx.Provider>

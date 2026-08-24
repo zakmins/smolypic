@@ -8,8 +8,8 @@ import logoDark from '../assets/logo-dark.png';
 
 // Top-level navigation. A bare `item` is its own button (Live status stands
 // alone, no dropdown); a `group` is a collapsible dropdown holding sub-routes.
-// Each 'Dashboard' entry is admin-only — filtered out for a coach below.
-const ADMIN_ONLY_KEYS = ['stats', 'stock-dashboard'];
+// Each 'Dashboard'/'Reports' entry is admin-only — filtered out for a coach below.
+const ADMIN_ONLY_KEYS = ['stats', 'members-reports', 'stock-dashboard'];
 const NAV = [
   { type: 'item', key: 'live', label: 'Live status', icon: Icons.live },
   { type: 'group', key: 'members', label: 'Members', icon: Icons.members, items: [
