@@ -1,7 +1,7 @@
 {
   "name": "smolympic",
   "productName": "SMOLYMPIC",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Desktop gym management — live presence, members, judo, wrestling, stats, stock.",
   "private": true,
   "main": "electron/main.js",

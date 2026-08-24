@@ -37,6 +37,10 @@ const isoWeek = (d) => {
 // the final active day, then ≤ 0 once sub_end arrives.
 const subDaysLeft = (m) => Math.ceil((ms(m.subEnd) - Date.now()) / 86400000);
 
+// Same day count, but off a raw db row (snake_case sub_end) rather than the
+// camelCase dict shape — for swipe/check-in, which never go through memberRowToDict.
+const rowDaysLeft = (m, now) => Math.ceil((ms(m.sub_end) - now.getTime()) / 86400000);
+
 // Negative quota ⇒ the club is carrying the member. Unlimited subs (NULL quota) never qualify.
 const isOwed = (m) => m.sessionsLeft != null && m.sessionsLeft < 0;
 
@@ -390,10 +394,22 @@ function swipe(db, { body }) {
       event = { kind: 'out', entryTime: ms(open.entry_time), at: now.getTime() };
     } else {
       db.prepare('INSERT INTO entries (member_id,entry_time,exit_time) VALUES (?,?,NULL)').run(m.id, iso(now));
-      if (m.membership_type === 'subscription' && m.sessions_total != null) {
-        // Metered subscription: burn a session from the quota (already paid, no charge).
-        // Unlimited subscriptions (sessions_total NULL) never decrement.
-        db.prepare('UPDATE members SET sessions_left=sessions_left-1 WHERE id=?').run(m.id);
+      if (m.membership_type === 'subscription') {
+        const dead = rowDaysLeft(m, now) <= 0;   // sub_end already passed — the plan is dead
+        if (m.sessions_total != null) {
+          // Metered subscription: burn a session from the quota (already paid, no charge).
+          // Once the plan is dead, there's no live balance left to spend — floor it at 0
+          // first so a swipe on a dead plan always costs exactly one owed session, instead
+          // of quietly draining whatever was left unused on an expired plan.
+          const base = dead ? Math.min(m.sessions_left, 0) : m.sessions_left;
+          db.prepare('UPDATE members SET sessions_left=? WHERE id=?').run(base - 1, m.id);
+        } else if (dead) {
+          // Unlimited subscription, but expired: a dead plan no longer grants free
+          // access, so the club owes a session — same as an expired metered plan —
+          // to be settled directly or carried into the member's next renewal.
+          db.prepare('UPDATE members SET sessions_left=? WHERE id=?').run(Math.min(m.sessions_left ?? 0, 0) - 1, m.id);
+        }
+        // A live unlimited subscription (not dead) still never decrements.
       }
       event = { kind: 'in', at: now.getTime() };
     }
@@ -436,9 +452,15 @@ function checkIn(db, { params, user }) {
   if (open) throw new HttpError(400, 'Member is already inside');
   const now = new Date();
   db.prepare('INSERT INTO entries (member_id,entry_time,exit_time) VALUES (?,?,NULL)').run(id, iso(now));
-  if (m.membership_type === 'subscription' && m.sessions_total != null) {
-    // Metered subscription: burn a session from the quota, same as a real swipe.
-    db.prepare('UPDATE members SET sessions_left=sessions_left-1 WHERE id=?').run(id);
+  if (m.membership_type === 'subscription') {
+    // Metered/unlimited-debt accounting mirrors a real swipe — see swipe() above.
+    const dead = rowDaysLeft(m, now) <= 0;
+    if (m.sessions_total != null) {
+      const base = dead ? Math.min(m.sessions_left, 0) : m.sessions_left;
+      db.prepare('UPDATE members SET sessions_left=? WHERE id=?').run(base - 1, id);
+    } else if (dead) {
+      db.prepare('UPDATE members SET sessions_left=? WHERE id=?').run(Math.min(m.sessions_left ?? 0, 0) - 1, id);
+    }
   }
   logActivity(db, user.id, 'member.check_in', m.name, `Manually checked in ${m.name}`);
   return {
