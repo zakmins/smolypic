@@ -30,6 +30,29 @@ export const FR = {
   "Sessions collected — {name}": "Séances encaissées — {name}",
   "Collection failed: {msg}": "Échec de l'encaissement : {msg}",
 
+  // ── Payment corrections (void / edit method) ──
+  "Void this charge — wrong amount, duplicate entry, etc.": "Annuler ce paiement — montant erroné, doublon, etc.",
+  "Void the charge for {name}": "Annuler le paiement de {name}",
+  "This reverses the {amount} walk-in charge for {name} and removes them from the floor. This cannot be undone.":
+    "Ceci annule le paiement de {amount} de {name} et le retire de la salle. Cette action est irréversible.",
+  "e.g. wrong amount entered, duplicate entry…": "ex. montant erroné, doublon…",
+  "Payment history": "Historique des paiements",
+  "Loading payments…": "Chargement des paiements…",
+  "No payments recorded yet.": "Aucun paiement enregistré pour l'instant.",
+  "Subscription": "Abonnement",
+  "Session": "Séance",
+  "Insurance": "Assurance",
+  "Reversal": "Annulation",
+  "Voided": "Annulé",
+  "Void": "Annuler",
+  "Void payment": "Annuler le paiement",
+  "This posts a reversal for the {amount} {kind} payment on {date} and restores any balance, dates, or session quota it changed. This cannot be undone.":
+    "Ceci enregistre une contre-écriture pour le paiement {kind} de {amount} du {date} et restaure le solde, les dates ou le quota de séances modifiés. Cette action est irréversible.",
+  "Reason (required)": "Motif (obligatoire)",
+  "e.g. wrong amount entered, duplicate entry, wrong member selected…": "ex. montant erroné, doublon, mauvais membre sélectionné…",
+  "Payment voided": "Paiement annulé",
+  "Void failed: {msg}": "Échec de l'annulation : {msg}",
+
   // ── App shell: loading, errors, toasts ──
   "Nothing here yet — coming soon.": "Rien ici pour l'instant — bientôt disponible.",
   "Member reports — coming soon.": "Rapports des membres — bientôt disponible.",
@@ -220,7 +243,7 @@ export const FR = {
   "Search name, phone or RFID tag…": "Rechercher nom, téléphone ou tag RFID…",
   "Search members": "Rechercher des membres",
   "Filter by gender": "Filtrer par sexe",
-  "All genders": "Tous les sexes",
+  "All genders": "Tous les genres",
   "Male": "Homme",
   "Female": "Femme",
   "Filter by sport": "Filtrer par sport",

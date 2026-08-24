@@ -365,6 +365,24 @@ function Dashboard() {
     }
   }, [showToast]);
 
+  // ── Payment corrections (void) ──
+  const voidPayment = useCallback(async (paymentId, reason) => {
+    try {
+      const res = await api(`/payments/${paymentId}/void`, { method: 'POST', body: { reason } });
+      if (res.member) setMembers((ms) => ms.map((x) => (x.id === res.member.id ? res.member : x)));
+      // Voiding a walk-in charge can also clear its floor entry, so refresh
+      // presence/today the same way any other floor-affecting action does.
+      const d = await api('/bootstrap');
+      setPresence(d.presence);
+      setToday(d.today);
+      showToast('Payment voided');
+      return res;
+    } catch (e) {
+      showToast('Void failed: {msg}', { msg: e.message });
+      return null;
+    }
+  }, [showToast]);
+
   const deleteMember = useCallback(async (id) => {
     try {
       await api(`/members/${id}`, { method: 'DELETE' });
@@ -446,11 +464,11 @@ function Dashboard() {
 
   const ctx = useMemo(() => ({
     members, presence, exits, today, stock, stockLog, consumed, pricing,
-    saveMember, renewMember, payInsurance, payBalance, collectSessions, deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing,
+    saveMember, renewMember, payInsurance, payBalance, collectSessions, voidPayment, deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing,
     savePreferences, simulateSwipe, handleSwipe, addGuestSession, removeGuestSession, forceExitMember, checkInMember, showToast,
     daysRemaining, memberStatus, setRoute, focusMemberId, setFocusMemberId, openNewMember, setOpenNewMember,
   }), [members, presence, exits, today, stock, stockLog, consumed, pricing, saveMember, renewMember, payInsurance, payBalance, collectSessions,
-       deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing, savePreferences, simulateSwipe, handleSwipe,
+       voidPayment, deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing, savePreferences, simulateSwipe, handleSwipe,
        addGuestSession, removeGuestSession, forceExitMember, checkInMember, showToast, focusMemberId, openNewMember]);
 
   const pages = {

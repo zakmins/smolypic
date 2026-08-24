@@ -21,6 +21,9 @@ const SORTS = {
 
 // Entry-history pager shows 5 visits per page (pageList lives in utils).
 const ENTRY_PAGE_SIZE = 5;
+// Payment-history pager shows 5 payments per page.
+const PAYMENT_PAGE_SIZE = 5;
+const PAYMENT_KIND_LABEL = { subscription: 'Subscription', session: 'Session', insurance: 'Insurance' };
 // Members table pager.
 const MEMBERS_PAGE_SIZE = 50;
 
@@ -208,7 +211,7 @@ export default function Customers() {
 
 function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect, onPayInsurance, onCheckIn, onDelete }) {
   const t = useT();
-  const { pricing } = useContext(AppCtx);
+  const { pricing, voidPayment } = useContext(AppCtx);
   const insurancePrice = pricing?.insurance ?? INSURANCE_PRICE;
   const ins = insuranceStatus(m);
   const days = daysRemaining(m);
@@ -230,6 +233,18 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
     return () => { live = false; };
   }, [m.id]);
   const totalPages = visits ? Math.max(1, Math.ceil(visits.length / ENTRY_PAGE_SIZE)) : 1;
+
+  // Payment history — the surface staff correct mistakes from (void / edit method).
+  const [payments, setPayments] = useState(null);
+  const [payPage, setPayPage] = useState(1);
+  const reloadPayments = useCallback(() => {
+    let live = true;
+    api(`/members/${m.id}/payments`).then((p) => live && setPayments(p)).catch(() => live && setPayments([]));
+    return () => { live = false; };
+  }, [m.id]);
+  useEffect(() => { setPayments(null); setPayPage(1); return reloadPayments(); }, [reloadPayments]);
+  const payTotalPages = payments ? Math.max(1, Math.ceil(payments.length / PAYMENT_PAGE_SIZE)) : 1;
+  const [voiding, setVoiding] = useState(null);   // payment object being voided
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -361,6 +376,57 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
               <div className="pager-meta">{`${visits.length === 1 ? t('{n} visit', { n: visits.length }) : t('{n} visits', { n: visits.length })} · ${t('page {page} of {total}', { page, total: totalPages })}`}</div>
             </>
           )}
+
+          <div className="panel-title" style={{ margin: '22px 0 10px' }}>{t('Payment history')}</div>
+          {payments == null ? (
+            <div className="empty-state" style={{ padding: '16px 0' }}>{t('Loading payments…')}</div>
+          ) : payments.length === 0 ? (
+            <div className="empty-state" style={{ padding: '16px 0' }}>{t('No payments recorded yet.')}</div>
+          ) : (
+            <>
+              {payments.slice((payPage - 1) * PAYMENT_PAGE_SIZE, payPage * PAYMENT_PAGE_SIZE).map((p) => (
+                <div key={p.id} className="leader-row" style={{ alignItems: 'flex-start' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+                      {t(PAYMENT_KIND_LABEL[p.kind] || p.kind)}
+                      {p.isReversal && <span className="badge neutral" style={{ marginLeft: 6 }}>{t('Reversal')}</span>}
+                      {p.voidedAt && <span className="badge red" style={{ marginLeft: 6 }}>{t('Voided')}</span>}
+                    </div>
+                    <div className="mono" style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--muted)' }}>
+                      {fmtDate(p.date)} · {p.method || '—'}{p.createdBy ? ` · ${p.createdBy}` : ''}
+                    </div>
+                  </div>
+                  <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+                    <div className="mono num" style={{
+                      fontWeight: 700,
+                      color: p.amount < 0 ? 'var(--red)' : p.voidedAt ? 'var(--muted)' : 'var(--text)',
+                      textDecoration: p.voidedAt ? 'line-through' : 'none',
+                    }}>
+                      {dzd(p.amount)}
+                    </div>
+                    {!p.voidedAt && !p.isReversal && (
+                      <div style={{ display: 'flex', gap: 6, marginTop: 4, justifyContent: 'flex-end' }}>
+                        <button className="btn sm danger" onClick={() => setVoiding(p)}>{t('Void')}</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {payTotalPages > 1 && (
+                <div className="pager">
+                  <button className="pager-btn" disabled={payPage === 1}
+                    onClick={() => setPayPage((p) => Math.max(1, p - 1))} aria-label={t('Previous page')}>‹ {t('Prev')}</button>
+                  {pageList(payPage, payTotalPages).map((p, idx) => (p === '…'
+                    ? <span key={`paygap-${idx}`} className="pager-gap">…</span>
+                    : <button key={p} className={`pager-btn ${p === payPage ? 'on' : ''}`}
+                        aria-current={p === payPage ? 'page' : undefined} onClick={() => setPayPage(p)}>{p}</button>
+                  ))}
+                  <button className="pager-btn" disabled={payPage === payTotalPages}
+                    onClick={() => setPayPage((p) => Math.min(payTotalPages, p + 1))} aria-label={t('Next page')}>{t('Next')} ›</button>
+                </div>
+              )}
+            </>
+          )}
         </div>
         <div className="modal-foot" style={{ justifyContent: 'flex-start' }}>
           <button className="btn primary" onClick={onRenew}>{t('Renew / add sessions')}</button>
@@ -391,7 +457,48 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
       </div>
       </Portal>
     )}
+    {voiding && (
+      <VoidPaymentModal payment={voiding} onClose={() => setVoiding(null)}
+        onConfirm={async (reason) => {
+          const res = await voidPayment(voiding.id, reason);
+          setVoiding(null);
+          if (res) reloadPayments();
+        }} />
+    )}
     </>
+  );
+}
+
+// Void a payment — restores whatever it changed (balance, sub_end, session
+// quota, insurance) and posts a reversal entry. Requires a reason; the server
+// enforces who may act on it and within what time window.
+function VoidPaymentModal({ payment: p, onClose, onConfirm }) {
+  const t = useT();
+  const [reason, setReason] = useState('');
+  return (
+    <Portal>
+    <div className="modal-center" onClick={onClose}>
+      <div className="modal" style={{ width: 460 }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('Void payment')}>
+        <div className="modal-head">
+          <div className="modal-title">{t('Void payment')}</div>
+          <button className="x-btn" onClick={onClose} aria-label={t('Close')}>×</button>
+        </div>
+        <div className="modal-body">
+          <div style={{ marginBottom: 14 }}>
+            {t('This posts a reversal for the {amount} {kind} payment on {date} and restores any balance, dates, or session quota it changed. This cannot be undone.',
+              { amount: dzd(p.amount), kind: t(PAYMENT_KIND_LABEL[p.kind] || p.kind).toLowerCase(), date: fmtDate(p.date) })}
+          </div>
+          <div className="field full"><label>{t('Reason (required)')}</label>
+            <textarea rows={3} value={reason} autoFocus onChange={(e) => setReason(e.target.value)}
+              placeholder={t('e.g. wrong amount entered, duplicate entry, wrong member selected…')} /></div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>{t('Cancel')}</button>
+          <button className="btn danger" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim())}>{t('Void payment')}</button>
+        </div>
+      </div>
+    </div>
+    </Portal>
   );
 }
 

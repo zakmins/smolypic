@@ -9,7 +9,7 @@ import Portal from '../components/Portal.jsx';
 const TWO_HOURS = 2 * 3600 * 1000;
 
 export default function LiveStatus() {
-  const { members, presence, exits, today, setRoute, setFocusMemberId, removeGuestSession, forceExitMember, collectSessions } = useContext(AppCtx);
+  const { members, presence, exits, today, setRoute, setFocusMemberId, removeGuestSession, voidPayment, forceExitMember, collectSessions } = useContext(AppCtx);
   const t = useT();
   const [, tick] = useState(0);
   const [modal, setModal] = useState(null);   // 'inside' | 'exits' | 'subscribed' | 'entries' | 'owed' | 'expiring' | 'balances' | null
@@ -19,6 +19,7 @@ export default function LiveStatus() {
   const [expiringList, setExpiringList] = useState(null);
   const [confirmExit, setConfirmExit] = useState(null);   // member pending manual "mark as exited"
   const [collecting, setCollecting] = useState(null);   // owed-row entry pending session collection
+  const [voidingGuest, setVoidingGuest] = useState(null);   // guest row pending a voided walk-in charge
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(t);
@@ -139,6 +140,12 @@ export default function LiveStatus() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--faint)' }}>{t('in')} {fmtTime(row.entryTime)}</span>
+          {row.paymentId != null && (
+            <button className="icon-btn" style={{ width: 30, height: 30 }} title={t('Void this charge — wrong amount, duplicate entry, etc.')}
+              aria-label={t('Void the charge for {name}', { name: row.name })} onClick={() => setVoidingGuest(row)}>
+              <Icons.undo width="15" height="15" />
+            </button>
+          )}
           <button className="icon-btn" style={{ width: 30, height: 30 }} title={t('Remove from floor')}
             aria-label={t('Remove {name} from the floor', { name: row.name })} onClick={() => removeGuestSession(row.guestId)}>
             <Icons.trash width="15" height="15" />
@@ -411,6 +418,11 @@ export default function LiveStatus() {
         </div>
         </Portal>
       )}
+
+      {voidingGuest && (
+        <VoidGuestModal row={voidingGuest} onClose={() => setVoidingGuest(null)}
+          onConfirm={async (reason) => { await voidPayment(voidingGuest.paymentId, reason); setVoidingGuest(null); }} />
+      )}
     </>
   );
 }
@@ -455,6 +467,39 @@ function CollectSessionsForm({ entry, onClose, onSave }) {
             onClick={() => onSave(sessionsToCollect, Math.max(0, Number(amount) || 0))}>
             {sessionsToCollect === 1 ? t('Collect {n} session', { n: sessionsToCollect }) : t('Collect {n} sessions', { n: sessionsToCollect })}
           </button>
+        </div>
+      </div>
+    </div>
+    </Portal>
+  );
+}
+
+// Void a walk-in charge — reverses the payment and clears this guest from the
+// floor (they shouldn't stay checked in for a session that's being corrected).
+// A normal early departure should still use "Remove from floor" instead.
+function VoidGuestModal({ row, onClose, onConfirm }) {
+  const t = useT();
+  const [reason, setReason] = useState('');
+  return (
+    <Portal>
+    <div className="modal-center" onClick={onClose}>
+      <div className="modal" style={{ width: 440 }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('Void payment')}>
+        <div className="modal-head">
+          <div className="modal-title">{t('Void payment')}</div>
+          <button className="x-btn" onClick={onClose} aria-label={t('Close')}>×</button>
+        </div>
+        <div className="modal-body">
+          <div style={{ marginBottom: 14 }}>
+            {t('This reverses the {amount} walk-in charge for {name} and removes them from the floor. This cannot be undone.',
+              { amount: dzd(row.amount), name: row.name })}
+          </div>
+          <div className="field full"><label>{t('Reason (required)')}</label>
+            <textarea rows={3} value={reason} autoFocus onChange={(e) => setReason(e.target.value)}
+              placeholder={t('e.g. wrong amount entered, duplicate entry…')} /></div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>{t('Cancel')}</button>
+          <button className="btn danger" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim())}>{t('Void payment')}</button>
         </div>
       </div>
     </div>

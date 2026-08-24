@@ -48,11 +48,31 @@ CREATE TABLE IF NOT EXISTS payments (
   method TEXT,
   date TEXT NOT NULL,
   walk_in INTEGER NOT NULL DEFAULT 0, -- 1 ⇒ anonymous "+ Session" drop-in (never a member)
-  balance_payment INTEGER NOT NULL DEFAULT 0 -- 1 ⇒ collecting a previously-recorded balance
+  balance_payment INTEGER NOT NULL DEFAULT 0, -- 1 ⇒ collecting a previously-recorded balance
                                               -- (still real revenue, but not a new subscribe/renew event)
+  created_by INTEGER,               -- staff who recorded it (users.id); NULL for pre-migration rows
+  reverses_payment_id INTEGER,      -- set on a reversal row: the original payment it nets out
+  voided_at TEXT,                   -- set on the ORIGINAL row once a reversal has been posted against it
+  member_snapshot TEXT               -- JSON {before,after} of the members fields this payment touched —
+                                      -- lets a void restore them exactly instead of guessing
 );
 CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(date);
 CREATE INDEX IF NOT EXISTS idx_payments_member ON payments(member_id);
+
+-- Structured audit trail for payment corrections (void / edit-method). Kept
+-- separate from activity_log (free-text, all actions) so before/after values
+-- stay queryable; a matching human-readable line still goes to activity_log.
+CREATE TABLE IF NOT EXISTS corrections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  payment_id INTEGER NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,              -- 'void' (only action type for now)
+  reason TEXT NOT NULL,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  before_json TEXT,
+  after_json TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_corrections_payment ON corrections(payment_id);
 
 CREATE TABLE IF NOT EXISTS judo_students (
   member_id INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
@@ -118,7 +138,8 @@ CREATE TABLE IF NOT EXISTS guest_sessions (
   name TEXT NOT NULL,
   amount INTEGER NOT NULL,
   entry_time TEXT NOT NULL,
-  expires_at TEXT NOT NULL
+  expires_at TEXT NOT NULL,
+  payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL -- links back to the walk-in charge, so voiding it can also clear the floor entry
 );
 
 -- Optional member portrait — kept out of the member rows/list payloads. The
@@ -281,6 +302,33 @@ function savePricing(db, pricing) {
   return merged;
 }
 
+// ── Payment-correction settings ──────────────────────────────────────────────
+// windowHours: how long after recording a payment its own staff member may
+// void it or edit its method without admin approval. Past the window (or for
+// someone else's payment) only an admin can act. Admin-editable, same
+// key→JSON settings row as pricing.
+const DEFAULT_CORRECTIONS = { windowHours: 24 };
+
+function normalizeCorrections(input) {
+  const n = Math.round(Number(input && input.windowHours));
+  return { windowHours: Number.isFinite(n) && n > 0 ? n : DEFAULT_CORRECTIONS.windowHours };
+}
+
+function getCorrectionSettings(db) {
+  const row = db.prepare("SELECT value FROM settings WHERE key='corrections'").get();
+  let stored = null;
+  if (row) { try { stored = JSON.parse(row.value); } catch { stored = null; } }
+  return normalizeCorrections(stored);
+}
+
+function saveCorrectionSettings(db, settings) {
+  const merged = normalizeCorrections(settings);
+  db.prepare(
+    "INSERT INTO settings (key,value) VALUES ('corrections',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+  ).run(JSON.stringify(merged));
+  return merged;
+}
+
 // The default per-session rate — the first configured session price. Used for
 // pay-per-session billing on swipe and the "sessions owed" amounts.
 function sessionPriceFor(pricing) {
@@ -353,6 +401,14 @@ function openDb(dbPath) {
   // predate the column; existing rows default to 0 (nothing to backfill — the
   // old code never recorded which payments were balance collections).
   ensureColumn(db, 'payments', 'balance_payment', 'INTEGER NOT NULL DEFAULT 0');
+  // Payment corrections (void / edit-method): who recorded it, whether it's a
+  // reversal of another row, whether it's been voided, and the before/after
+  // member-field snapshot a void restores from. Older databases predate all four.
+  ensureColumn(db, 'payments', 'created_by', 'INTEGER');
+  ensureColumn(db, 'payments', 'reverses_payment_id', 'INTEGER');
+  ensureColumn(db, 'payments', 'voided_at', 'TEXT');
+  ensureColumn(db, 'payments', 'member_snapshot', 'TEXT');
+  ensureColumn(db, 'guest_sessions', 'payment_id', 'INTEGER');
   return db;
 }
 
@@ -451,4 +507,5 @@ module.exports = {
   SCHEMA, openDb, iso, isoDate, ms,
   hashPassword, verifyPassword, userRowToDict, memberRowToDict, setMemberPhoto, logActivity,
   DEFAULT_PRICING, getPricing, savePricing, sessionPriceFor,
+  DEFAULT_CORRECTIONS, getCorrectionSettings, saveCorrectionSettings,
 };

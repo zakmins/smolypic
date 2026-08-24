@@ -5,7 +5,7 @@
 const crypto = require('crypto');
 const {
   iso, isoDate, ms, hashPassword, verifyPassword, userRowToDict, memberRowToDict, setMemberPhoto, logActivity,
-  getPricing, savePricing, sessionPriceFor,
+  getPricing, savePricing, sessionPriceFor, getCorrectionSettings, saveCorrectionSettings,
 } = require('./db.js');
 
 const INSURANCE_DAYS = 365;
@@ -61,15 +61,44 @@ function getMember(db, id) {
   return r;
 }
 
+function paymentRowToDict(db, r) {
+  const author = r.created_by ? db.prepare('SELECT full_name, username FROM users WHERE id=?').get(r.created_by) : null;
+  return {
+    id: r.id,
+    memberId: r.member_id,
+    amount: r.amount,
+    kind: r.kind,
+    sport: r.sport,
+    method: r.method,
+    date: r.date,
+    walkIn: !!r.walk_in,
+    balancePayment: !!r.balance_payment,
+    createdBy: author ? (author.full_name || author.username) : null,
+    reversesPaymentId: r.reverses_payment_id,
+    voidedAt: r.voided_at,
+    isReversal: r.reverses_payment_id != null,
+  };
+}
+
+// Can `user` void/edit a payment recorded at `dateStr` by `createdBy`? Own
+// transactions are self-service within the configured window; anything else
+// (someone else's entry, or past the window) needs an admin.
+function canCorrect(db, user, dateStr, createdBy) {
+  if (user.role === 'admin') return true;
+  if (createdBy !== user.id) return false;
+  const windowMs = getCorrectionSettings(db).windowHours * 3600000;
+  return (Date.now() - ms(dateStr)) <= windowMs;
+}
+
 function presenceList(db) {
   const members = db.prepare('SELECT member_id, entry_time FROM entries WHERE exit_time IS NULL ORDER BY entry_time DESC')
     .all().map((r) => ({ memberId: r.member_id, entryTime: ms(r.entry_time) }));
   // Walk-in free sessions count as inside until their 2h window lapses.
   const guests = db.prepare(
-    'SELECT id, name, amount, entry_time, expires_at FROM guest_sessions WHERE expires_at > ? ORDER BY entry_time DESC',
+    'SELECT id, name, amount, entry_time, expires_at, payment_id FROM guest_sessions WHERE expires_at > ? ORDER BY entry_time DESC',
   ).all(iso(new Date())).map((r) => ({
     guest: true, guestId: r.id, name: r.name, amount: r.amount,
-    entryTime: ms(r.entry_time), expiresAt: ms(r.expires_at),
+    entryTime: ms(r.entry_time), expiresAt: ms(r.expires_at), paymentId: r.payment_id,
   }));
   return [...guests, ...members];
 }
@@ -247,24 +276,28 @@ function bootstrap(db) {
   };
 }
 
-// The editable price book (insurance, session and subscription prices).
+// The editable price book (insurance, session and subscription prices) plus
+// the payment-correction settings (self-service void/edit window).
 function getSettings(db) {
-  return { pricing: getPricing(db) };
+  return { pricing: getPricing(db), corrections: getCorrectionSettings(db) };
 }
 
 function updateSettings(db, { body, user }) {
   const pricing = savePricing(db, body.pricing ?? body);
+  const corrections = body.corrections ? saveCorrectionSettings(db, body.corrections) : getCorrectionSettings(db);
   logActivity(db, user.id, 'settings.update', 'pricing', 'Updated the price book');
-  return { pricing };
+  return { pricing, corrections };
 }
 
 // Today's subscribers — one entry per subscribe/renew payment dated today, newest
-// first. Excludes balance_payment=1: paying off an old balance isn't a fresh
-// subscribe/renew, so it shouldn't re-list the member here.
+// first. Excludes balance_payment=1 (paying off an old balance isn't a fresh
+// subscribe/renew) and voided/reversal rows (a corrected mistake shouldn't
+// re-list, or list negatively, as if it were a real subscription today).
 function liveSubscribedToday(db) {
   const start = dayStart();
   const rows = db.prepare(
-    "SELECT amount, method, date, member_id FROM payments WHERE kind='subscription' AND balance_payment=0 AND date>=? ORDER BY date DESC",
+    "SELECT amount, method, date, member_id FROM payments "
+    + "WHERE kind='subscription' AND balance_payment=0 AND voided_at IS NULL AND reverses_payment_id IS NULL AND date>=? ORDER BY date DESC",
   ).all(start);
   const out = [];
   for (const r of rows) {
@@ -422,11 +455,13 @@ function guestSession(db, { body, user }) {
   const amount = Math.max(0, Math.round(Number(body.amount) || 0));
   // Bill it as a session (counts in today's session revenue + count, by-sport stats).
   // walk_in=1 marks it as an anonymous drop-in for the walk-in reports.
-  db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,walk_in) VALUES (NULL,?,?,?,?,?,1)')
-    .run(amount, 'session', 'GYM', 'Cash', iso(now));
+  const pay = db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,walk_in,created_by) VALUES (NULL,?,?,?,?,?,1,?)')
+    .run(amount, 'session', 'GYM', 'Cash', iso(now), user.id);
   const expires = new Date(now.getTime() + 2 * 3600 * 1000);   // on the floor for 2 hours
-  db.prepare('INSERT INTO guest_sessions (name,amount,entry_time,expires_at) VALUES (?,?,?,?)')
-    .run(name, amount, iso(now), iso(expires));
+  // Linked to its payment so voiding the charge (a mistake — wrong amount,
+  // duplicate entry) can also clear this floor entry.
+  db.prepare('INSERT INTO guest_sessions (name,amount,entry_time,expires_at,payment_id) VALUES (?,?,?,?,?)')
+    .run(name, amount, iso(now), iso(expires), pay.lastInsertRowid);
   logActivity(db, user.id, 'session.free', name, `Session — ${name} (${amount} DZD)`);
   return {
     members: allMembers(db),
@@ -489,12 +524,16 @@ function createMember(db, { body, user }) {
     body.hue != null ? body.hue : now.getMilliseconds() % 360, iso(now),
   );
   if (amount) {
-    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
-      .run(info.lastInsertRowid, amount, 'subscription', sports[0], 'Cash', iso(now));
+    // Nothing existed before this member's own row, so "before" this payment
+    // the full fee was owed and nothing was collected yet.
+    const snap = JSON.stringify({ before: { balance: total }, after: { balance } });
+    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,created_by,member_snapshot) VALUES (?,?,?,?,?,?,?,?)')
+      .run(info.lastInsertRowid, amount, 'subscription', sports[0], 'Cash', iso(now), user.id, snap);
   }
   if (body.insurance) {
-    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
-      .run(info.lastInsertRowid, getPricing(db).insurance, 'insurance', null, 'Cash', iso(now));
+    const snap = JSON.stringify({ before: { insurance: 0, insurance_expiry: null }, after: { insurance: 1, insurance_expiry: insExpiry } });
+    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,created_by,member_snapshot) VALUES (?,?,?,?,?,?,?,?)')
+      .run(info.lastInsertRowid, getPricing(db).insurance, 'insurance', null, 'Cash', iso(now), user.id, snap);
   }
   if (body.photo) setMemberPhoto(db, info.lastInsertRowid, body.photo);   // optional portrait
   const plan = sessionsTotal != null ? `metered ${body.durationDays ?? 30}d / ${sessionsTotal} sessions` : `unlimited ${body.durationDays ?? 30}d`;
@@ -543,8 +582,9 @@ function updateMember(db, { params, body, user }) {
     body.rfidUid ?? null, id,
   );
   if (nowInsured && !wasInsured) {
-    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
-      .run(id, getPricing(db).insurance, 'insurance', null, 'Cash', iso(now));
+    const snap = JSON.stringify({ before: { insurance: 0, insurance_expiry: null }, after: { insurance: 1, insurance_expiry: insExpiry } });
+    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,created_by,member_snapshot) VALUES (?,?,?,?,?,?,?,?)')
+      .run(id, getPricing(db).insurance, 'insurance', null, 'Cash', iso(now), user.id, snap);
   }
   // photo: a data URL replaces it, null clears it, undefined (omitted) leaves it.
   if (body.photo !== undefined) { setMemberPhoto(db, id, body.photo); changed.push(body.photo ? 'photo' : 'photo removed'); }
@@ -564,9 +604,13 @@ function payInsurance(db, { params, user }) {
   }
   const expiry = iso(new Date(now.getTime() + INSURANCE_DAYS * 86400000));
   const insurancePrice = getPricing(db).insurance;
+  const snap = JSON.stringify({
+    before: { insurance: m.insurance ? 1 : 0, insurance_expiry: m.insurance_expiry },
+    after: { insurance: 1, insurance_expiry: expiry },
+  });
   db.prepare('UPDATE members SET insurance=1, insurance_expiry=? WHERE id=?').run(expiry, id);
-  db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
-    .run(id, insurancePrice, 'insurance', null, 'Cash', iso(now));
+  db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,created_by,member_snapshot) VALUES (?,?,?,?,?,?,?,?)')
+    .run(id, insurancePrice, 'insurance', null, 'Cash', iso(now), user.id, snap);
   logActivity(db, user.id, 'member.insurance', m.name, `Insurance paid for ${m.name} — ${insurancePrice} DZD (valid to ${expiry.slice(0, 10)})`);
   return memberRowToDict(db, getMember(db, id));
 }
@@ -583,14 +627,24 @@ function renewMember(db, { params, body, user }) {
   const id = Number(params[0]);
   const m = getMember(db, id);
   const now = new Date();
+  // Snapshot every field a renewal can touch, before any of it changes — this is
+  // what lets a later void restore exactly, rather than guessing an inverse.
+  const before = {
+    sub_start: m.sub_start, sub_end: m.sub_end, duration_days: m.duration_days,
+    sessions_total: m.sessions_total, sessions_left: m.sessions_left, balance: m.balance,
+  };
+  const after = { ...before };
   // A renewal can extend the date, top up sessions, or (for metered subs) both.
   const parts = [];
   if (body.days) {
     const base = Math.max(now.getTime(), ms(m.sub_end));
     // sub_start moves to the same anchor: it should read as "start of the
     // current paid period," not freeze at the member's very first subscription.
+    after.sub_start = isoDate(new Date(base));
+    after.sub_end = isoDate(new Date(base + body.days * 86400000));
+    after.duration_days = body.days;
     db.prepare('UPDATE members SET sub_start=?, sub_end=?, duration_days=? WHERE id=?')
-      .run(isoDate(new Date(base)), isoDate(new Date(base + body.days * 86400000)), body.days, id);
+      .run(after.sub_start, after.sub_end, after.duration_days, id);
     parts.push(`+${body.days} days`);
   }
   if (body.applyPlan) {
@@ -600,13 +654,17 @@ function renewMember(db, { params, body, user }) {
     // instead of silently forgiving it. Going unlimited (total null) clears any
     // debt — an unlimited plan never meters sessions, so there'd be no way to
     // work it off.
-    const total = body.sessionsTotal ?? null;
+    const planTotal = body.sessionsTotal ?? null;
     const owed = Math.min(0, m.sessions_left ?? 0);
-    const newLeft = total == null ? null : total + owed;
-    db.prepare('UPDATE members SET sessions_total=?, sessions_left=? WHERE id=?').run(total, newLeft, id);
-    parts.push(total == null ? 'unlimited access' : `${total} sessions`);
+    const newLeft = planTotal == null ? null : planTotal + owed;
+    after.sessions_total = planTotal;
+    after.sessions_left = newLeft;
+    db.prepare('UPDATE members SET sessions_total=?, sessions_left=? WHERE id=?').run(planTotal, newLeft, id);
+    parts.push(planTotal == null ? 'unlimited access' : `${planTotal} sessions`);
     if (owed) parts.push(`${-owed} owed session(s) carried over`);
   } else if (body.sessions) {
+    after.sessions_total = (m.sessions_total || 0) + body.sessions;
+    after.sessions_left = (m.sessions_left || 0) + body.sessions;
     db.prepare('UPDATE members SET sessions_total=COALESCE(sessions_total,0)+?, sessions_left=COALESCE(sessions_left,0)+? WHERE id=?')
       .run(body.sessions, body.sessions, id);
     parts.push(`+${body.sessions} sessions`);
@@ -620,13 +678,15 @@ function renewMember(db, { params, body, user }) {
   const total = body.total != null ? Math.max(0, Math.round(Number(body.total))) : amount;
   const owedNow = Math.max(0, total - amount);
   if (owedNow) {
+    after.balance = m.balance + owedNow;
     db.prepare('UPDATE members SET balance=balance+? WHERE id=?').run(owedNow, id);
     parts.push(`balance due ${owedNow} DZD`);
   }
   const detail = `Renewed ${m.name}: ${parts.join(', ')}`;
   if (amount) {
-    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
-      .run(id, amount, kind, JSON.parse(m.sports)[0], 'Cash', iso(now));
+    const snap = JSON.stringify({ before, after });
+    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,created_by,member_snapshot) VALUES (?,?,?,?,?,?,?,?)')
+      .run(id, amount, kind, JSON.parse(m.sports)[0], 'Cash', iso(now), user.id, snap);
   }
   logActivity(db, user.id, 'member.renew', m.name, detail + (amount ? ` (${amount} DZD)` : ''));
   return memberRowToDict(db, getMember(db, id));
@@ -643,9 +703,10 @@ function payBalance(db, { params, body, user }) {
   const requested = body.amount != null ? Math.round(Number(body.amount)) : m.balance;
   const amount = Math.min(m.balance, Math.max(0, requested));
   if (!amount) throw new HttpError(400, 'Enter an amount greater than zero');
+  const snap = JSON.stringify({ before: { balance: m.balance }, after: { balance: m.balance - amount } });
   db.prepare('UPDATE members SET balance=balance-? WHERE id=?').run(amount, id);
-  db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,balance_payment) VALUES (?,?,?,?,?,?,1)')
-    .run(id, amount, 'subscription', JSON.parse(m.sports)[0], 'Cash', iso(now));
+  db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,balance_payment,created_by,member_snapshot) VALUES (?,?,?,?,?,?,1,?,?)')
+    .run(id, amount, 'subscription', JSON.parse(m.sports)[0], 'Cash', iso(now), user.id, snap);
   const left = m.balance - amount;
   logActivity(db, user.id, 'member.balance', m.name,
     `Collected ${amount} DZD from ${m.name}` + (left ? ` — ${left} DZD still owed` : ' — balance cleared'));
@@ -668,8 +729,9 @@ function collectSessions(db, { params, body, user }) {
   const amount = Math.max(0, Math.round(Number(body.amount) || 0));
   db.prepare('UPDATE members SET sessions_left=sessions_left+? WHERE id=?').run(sessions, id);
   if (amount) {
-    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date) VALUES (?,?,?,?,?,?)')
-      .run(id, amount, 'session', JSON.parse(m.sports)[0], 'Cash', iso(new Date()));
+    const snap = JSON.stringify({ before: { sessions_left: m.sessions_left }, after: { sessions_left: m.sessions_left + sessions } });
+    db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,created_by,member_snapshot) VALUES (?,?,?,?,?,?,?,?)')
+      .run(id, amount, 'session', JSON.parse(m.sports)[0], 'Cash', iso(new Date()), user.id, snap);
   }
   const left = owed - sessions;
   logActivity(db, user.id, 'member.sessions', m.name,
@@ -685,6 +747,80 @@ function memberEntries(db, { params, query }) {
   return db.prepare(
     'SELECT entry_time, exit_time FROM entries WHERE member_id=? AND exit_time IS NOT NULL ORDER BY entry_time DESC LIMIT ?',
   ).all(id, limit).map((r) => ({ entryTime: ms(r.entry_time), exitTime: ms(r.exit_time) }));
+}
+
+// A member's payment history — the surface staff correct mistakes from. Newest
+// first; includes voided originals and their reversal rows so the ledger reads
+// as a full audit trail, not just the net.
+function memberPayments(db, { params }) {
+  const id = Number(params[0]);
+  getMember(db, id);
+  return db.prepare('SELECT * FROM payments WHERE member_id=? ORDER BY date DESC, id DESC').all(id)
+    .map((r) => paymentRowToDict(db, r));
+}
+
+// Void a payment: restores the member fields it touched (from its stored
+// before/after snapshot) and posts an equal-and-opposite reversal row, so every
+// report that sums `payments.amount` nets out correctly with no query changes.
+// Refuses if something else has since changed the same member fields (a later
+// renewal, session use, or balance collection) — restoring blindly would
+// silently clobber that later, legitimate activity.
+function voidPayment(db, { params, body, user }) {
+  const id = Number(params[0]);
+  const p = db.prepare('SELECT * FROM payments WHERE id=?').get(id);
+  if (!p) throw new HttpError(404, 'Payment not found');
+  if (p.voided_at) throw new HttpError(400, 'This payment has already been voided');
+  if (p.reverses_payment_id != null) throw new HttpError(400, 'Cannot void a reversal entry');
+  const reason = (body.reason || '').trim();
+  if (!reason) throw new HttpError(400, 'A reason is required');
+  if (!canCorrect(db, user, p.date, p.created_by)) {
+    const win = getCorrectionSettings(db).windowHours;
+    throw new HttpError(403, p.created_by === user.id
+      ? `This payment is more than ${win}h old — ask an administrator to void it`
+      : 'Only an administrator can void a payment recorded by someone else');
+  }
+
+  let snap = null;
+  if (p.member_snapshot) { try { snap = JSON.parse(p.member_snapshot); } catch { snap = null; } }
+  let member = null;
+  if (p.member_id != null) {
+    member = db.prepare('SELECT * FROM members WHERE id=?').get(p.member_id);
+    if (member && snap && snap.after) {
+      const mismatch = Object.keys(snap.after).some((col) => String(member[col]) !== String(snap.after[col]));
+      if (mismatch) {
+        throw new HttpError(409, 'Something else has changed this member\'s account since this payment '
+          + '(a later renewal, session use, or balance collection) — an administrator must make a manual adjustment instead');
+      }
+      const sets = Object.keys(snap.before).map((col) => `${col}=?`).join(',');
+      db.prepare(`UPDATE members SET ${sets} WHERE id=?`).run(...Object.values(snap.before), p.member_id);
+    }
+  }
+
+  const now = iso(new Date());
+  db.prepare('UPDATE payments SET voided_at=? WHERE id=?').run(now, id);
+  const reversal = db.prepare(
+    `INSERT INTO payments (member_id,amount,kind,sport,method,date,walk_in,balance_payment,created_by,reverses_payment_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+  ).run(p.member_id, -p.amount, p.kind, p.sport, p.method, now, p.walk_in, p.balance_payment, user.id, p.id);
+
+  db.prepare(
+    'INSERT INTO corrections (payment_id,action,reason,user_id,before_json,after_json,created_at) VALUES (?,?,?,?,?,?,?)',
+  ).run(p.id, 'void', reason, user.id, snap ? JSON.stringify(snap.before) : null, snap ? JSON.stringify(snap.after) : null, now);
+
+  // A voided walk-in charge shouldn't leave its guest still counted on the
+  // floor for free — clear the linked entry (a no-op for member payments).
+  db.prepare('DELETE FROM guest_sessions WHERE payment_id=?').run(p.id);
+
+  const label = member ? member.name : `Payment #${p.id}`;
+  logActivity(db, user.id, 'payment.void', label,
+    `Voided ${p.amount} DZD ${p.kind} payment${member ? ` for ${member.name}` : ''} — ${reason}`);
+
+  return {
+    payment: paymentRowToDict(db, db.prepare('SELECT * FROM payments WHERE id=?').get(id)),
+    reversal: paymentRowToDict(db, db.prepare('SELECT * FROM payments WHERE id=?').get(reversal.lastInsertRowid)),
+    member: p.member_id != null ? memberRowToDict(db, getMember(db, p.member_id)) : null,
+    presence: presenceList(db),
+  };
 }
 
 // Revenue-by-category presentation + mapping, shared by the Statistics YTD view
@@ -1559,6 +1695,8 @@ const ROUTES = [
   { m: 'POST', re: /^\/members\/(\d+)\/collect-sessions$/, auth: true, fn: collectSessions },
   { m: 'POST', re: /^\/members\/(\d+)\/insurance$/, auth: true, fn: payInsurance },
   { m: 'GET', re: /^\/members\/(\d+)\/entries$/, fn: memberEntries },
+  { m: 'GET', re: /^\/members\/(\d+)\/payments$/, auth: true, fn: memberPayments },
+  { m: 'POST', re: /^\/payments\/(\d+)\/void$/, auth: true, fn: voidPayment },
   { m: 'GET', re: /^\/stats$/, fn: stats },
   { m: 'GET', re: /^\/stats\/panel$/, fn: statsPanel },
   { m: 'GET', re: /^\/reports\/members$/, fn: memberReports },

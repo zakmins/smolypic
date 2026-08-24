@@ -26,27 +26,29 @@ export default function TopBar() {
 
   return (
     <header className="topbar">
-      <div>
-        <div className="clock">{hh}:{mm}<small>:{ss}</small></div>
-        <div className="clock-date">{now.toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
-      </div>
-      <div className="top-divider" />
-      <div className="topstat">
-        <div className="v" style={{ color: 'var(--green)' }}>{insideNow}</div>
-        <div className="k">{t('Inside now')}</div>
-      </div>
-      <div className="topstat">
-        <div className="v">{today.entries}</div>
-        <div className="k">{t('Entries today')}</div>
-      </div>
-      <div className="top-divider" />
-      <div className="topstat">
-        <div className="v mono">{dzd(today.sessionRevenue)}</div>
-        <div className="k">{today.sessionCount === 1 ? t('{n} session today', { n: today.sessionCount }) : t('{n} sessions today', { n: today.sessionCount })}</div>
-      </div>
-      <div className="topstat">
-        <div className="v mono">{dzd(today.subscriptionRevenue)}</div>
-        <div className="k">{today.subscriptionCount === 1 ? t('{n} subscription today', { n: today.subscriptionCount }) : t('{n} subscriptions today', { n: today.subscriptionCount })}</div>
+      <div className="top-stats">
+        <div className="top-clock">
+          <div className="clock">{hh}:{mm}<small>:{ss}</small></div>
+          <div className="clock-date">{now.toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
+        </div>
+        <div className="top-divider" />
+        <div className="topstat">
+          <div className="v" style={{ color: 'var(--green)' }}>{insideNow}</div>
+          <div className="k">{t('Inside now')}</div>
+        </div>
+        <div className="topstat">
+          <div className="v">{today.entries}</div>
+          <div className="k">{t('Entries today')}</div>
+        </div>
+        <div className="top-divider" />
+        <div className="topstat">
+          <div className="v mono">{dzd(today.sessionRevenue)}</div>
+          <div className="k">{today.sessionCount === 1 ? t('{n} session today', { n: today.sessionCount }) : t('{n} sessions today', { n: today.sessionCount })}</div>
+        </div>
+        <div className="topstat">
+          <div className="v mono">{dzd(today.subscriptionRevenue)}</div>
+          <div className="k">{today.subscriptionCount === 1 ? t('{n} subscription today', { n: today.subscriptionCount }) : t('{n} subscriptions today', { n: today.subscriptionCount })}</div>
+        </div>
       </div>
       <div className="top-actions">
         {import.meta.env.DEV && (
@@ -54,10 +56,10 @@ export default function TopBar() {
             <Icons.swipe width="15" height="15" /> {t('Test scan')}
           </button>
         )}
-        <button className="btn primary" onClick={() => setFreeSession(true)} title={t('Add a walk-in paid session to the floor')}>
+        <button className="btn sm primary" onClick={() => setFreeSession(true)} title={t('Add a walk-in paid session to the floor')}>
           {t('Session')}
         </button>
-        <button className="btn" onClick={() => { setRoute('customers'); setOpenNewMember(true); }} title={t('Register a new member')}>
+        <button className="btn sm" onClick={() => { setRoute('customers'); setOpenNewMember(true); }} title={t('Register a new member')}>
           {t('New member')}
         </button>
         <div className="top-divider" />
@@ -73,7 +75,7 @@ export default function TopBar() {
           </div>
         )}
         <button className="icon-btn logout-btn" onClick={logout} title={t('Sign out')} aria-label={t('Sign out')}>
-          <Icons.logout width="17" height="17" />
+          <Icons.logout width="14" height="14" />
         </button>
       </div>
       {freeSession && (
