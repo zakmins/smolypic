@@ -1,2 +1,8 @@
 node_modules
 release
+
+# TTS demo scratch files + fetched runtime assets (piper.exe + voice models —
+# large binaries, fetched by `npm run fetch:tts` instead of being committed)
+tts_demo/
+french_voices_demo/
+electron/resources/tts/

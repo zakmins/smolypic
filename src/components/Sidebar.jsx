@@ -89,7 +89,7 @@ export default function Sidebar({ route, setRoute }) {
         ))}
       </nav>
       <div className="nav-spacer" />
-      <div className="sidebar-foot">v0.1.0 · {t('entrance reader online')}</div>
+      <div className="sidebar-foot">v{__APP_VERSION__} · {t('entrance reader online')}</div>
     </aside>
   );
 }

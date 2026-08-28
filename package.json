@@ -1,7 +1,7 @@
 {
   "name": "smolympic",
   "productName": "SMOLYMPIC",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Desktop gym management — live presence, members, judo, wrestling, stats, stock.",
   "private": true,
   "main": "electron/main.js",
@@ -13,7 +13,8 @@
     "electron:start": "npm run build && electron .",
     "dist": "npm run build && electron-builder",
     "rebuild:sqlite": "cd node_modules/better-sqlite3 && npx --yes prebuild-install -r electron -t 31.7.7 || npx --yes prebuild-install -r electron -t 31.7.6",
-    "postinstall": "npm run rebuild:sqlite"
+    "fetch:tts": "node scripts/fetch-tts-assets.js",
+    "postinstall": "npm run rebuild:sqlite && npm run fetch:tts"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
@@ -39,6 +40,9 @@
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      { "from": "electron/resources/tts", "to": "tts" }
+    ],
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico"

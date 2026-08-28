@@ -6,6 +6,8 @@
 const { app, BrowserWindow, ipcMain, Menu, protocol, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const { spawn } = require('child_process');
 const { openDb } = require('./server/db.js');
 const { seed, seedAdmin } = require('./server/seed.js');
 const { handleRequest } = require('./server/router.js');
@@ -102,6 +104,49 @@ ipcMain.handle('api:request', (_evt, payload) => handleRequest(db, payload || {}
 // simulator); a real RFID reader integration would call the same send().
 ipcMain.on('rfid:simulate', (_evt, rfidUid) => {
   if (win) win.webContents.send('rfid:swipe', rfidUid);
+});
+
+// ── French TTS (Piper) ──────────────────────────────────────────────────────
+// Piper is a native .exe — must be spawned from here, never the renderer
+// (contextIsolation/no nodeIntegration). Assets are fetched by
+// `npm run fetch:tts` (see scripts/fetch-tts-assets.js) rather than committed,
+// mirroring how better-sqlite3's prebuilt binary is fetched in postinstall.
+const TTS_VOICES = { male: 'fr_FR-tom-medium.onnx', female: 'fr_FR-siwis-medium.onnx' };
+function ttsResourceDir() {
+  return app.isPackaged ? path.join(process.resourcesPath, 'tts') : path.join(__dirname, 'resources', 'tts');
+}
+
+// Renderer only ever sends 'male'|'female' — never a filesystem path — so it
+// can't influence what gets passed to spawn().
+ipcMain.handle('tts:speak', async (_evt, payload) => {
+  const text = String(payload?.text || '').trim();
+  if (!text) return { ok: false, error: 'empty text' };
+  const voiceFile = TTS_VOICES[payload?.voice] || TTS_VOICES.female;
+
+  const dir = ttsResourceDir();
+  const piperExe = path.join(dir, 'piper', 'piper.exe');
+  const modelPath = path.join(dir, 'voices', voiceFile);
+  if (!fs.existsSync(piperExe) || !fs.existsSync(modelPath)) {
+    return { ok: false, error: 'TTS assets not installed — run `npm run fetch:tts`' };
+  }
+
+  const outWav = path.join(app.getPath('temp'), `smolympic-tts-${crypto.randomUUID()}.wav`);
+  try {
+    await new Promise((resolve, reject) => {
+      // Text goes over stdin, never a shell/argv string — no injection surface.
+      const child = spawn(piperExe, ['-m', modelPath, '-f', outWav], { cwd: path.dirname(piperExe) });
+      child.on('error', reject);
+      child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`piper exited with code ${code}`))));
+      child.stdin.write(text);
+      child.stdin.end();
+    });
+    const buf = fs.readFileSync(outWav);
+    return { ok: true, dataUrl: `data:audio/wav;base64,${buf.toString('base64')}` };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  } finally {
+    fs.promises.unlink(outWav).catch(() => {});
+  }
 });
 
 app.whenReady().then(() => {

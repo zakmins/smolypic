@@ -18,8 +18,12 @@ import Settings from './pages/Settings.jsx';
 import Login from './pages/Login.jsx';
 import { ThemeProvider, useTheme } from './theme.jsx';
 import { LanguageProvider, useLanguage, useT } from './i18n.jsx';
+import { TtsProvider, useTts } from './tts-settings.jsx';
+import { buildSpeech } from './tts.js';
 import { AuthProvider, useAuth } from './auth.jsx';
 import { applyAccent, clearAccent } from './accent.js';
+import { Icons } from './components/atoms.jsx';
+import { playMuteSound, playUnmuteSound } from './ui-sound.js';
 
 export const AppCtx = React.createContext(null);
 
@@ -39,9 +43,11 @@ export default function App() {
   return (
     <ThemeProvider>
       <LanguageProvider>
-        <AuthProvider>
-          <Root />
-        </AuthProvider>
+        <TtsProvider>
+          <AuthProvider>
+            <Root />
+          </AuthProvider>
+        </TtsProvider>
       </LanguageProvider>
     </ThemeProvider>
   );
@@ -79,6 +85,20 @@ function Dashboard() {
   const { setTheme } = useTheme();
   const { setLanguage } = useLanguage();
   const t = useT();
+  const { enabled: ttsEnabled, setEnabled: setTtsEnabled, voice: ttsVoice } = useTts();
+  // One-shot click animation on the floating mute button: a "sound ripple" on
+  // unmute, a quick shake on mute. Timed out and cleared the same way toasts are.
+  const [ttsAnim, setTtsAnim] = useState(null);
+  const ttsAnimTimer = useRef(null);
+  const toggleTts = useCallback(() => {
+    const next = !ttsEnabled;
+    setTtsEnabled(next);
+    setTtsAnim(next ? 'anim-ripple' : 'anim-shake');
+    (next ? playUnmuteSound : playMuteSound)();
+    if (ttsAnimTimer.current) clearTimeout(ttsAnimTimer.current);
+    ttsAnimTimer.current = setTimeout(() => setTtsAnim(null), next ? 620 : 260);
+  }, [ttsEnabled, setTtsEnabled]);
+  useEffect(() => () => { if (ttsAnimTimer.current) clearTimeout(ttsAnimTimer.current); }, []);
   const [route, setRoute] = useState('live');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -135,16 +155,42 @@ function Dashboard() {
 
   useEffect(() => { load(); }, [load]);
 
+  // ── TTS playback queue ──
+  // Synthesis (the IPC call to Piper) happens eagerly, as soon as each swipe
+  // comes in, so audio is ready with as little gap as possible. Playback is
+  // strictly serialized on top of that: `ttsChain` is a promise chain, one
+  // link per swipe in arrival order, and each link doesn't resolve — so the
+  // next swipe's audio doesn't start — until the current announcement's
+  // `ended` event fires. Two back-to-back swipes never overlap.
+  const ttsChain = useRef(Promise.resolve());
+  const enqueueTts = useCallback((speakPromise) => {
+    ttsChain.current = ttsChain.current.then(async () => {
+      let res;
+      try { res = await speakPromise; } catch (e) { console.error('[tts]', e); return; }
+      if (!res?.ok) { if (res?.error) console.error('[tts]', res.error); return; }
+      await new Promise((resolve) => {
+        const audio = new Audio(res.dataUrl);
+        audio.addEventListener('ended', resolve, { once: true });
+        audio.addEventListener('error', resolve, { once: true });
+        audio.play().catch(resolve);
+      });
+    });
+  }, []);
+
   // ── RFID swipe: the backend owns the IN/OUT logic and all edge cases ──
   const handleSwipe = useCallback(async (rfidUid) => {
     try {
       const d = await api('/swipe', { method: 'POST', body: { rfidUid } });
       setMembers(d.members); setPresence(d.presence); setExits(d.exits); setToday(d.today);
       setPopupQueue((q) => [...q, d.event]);
+      if (ttsEnabled && window.smolympic?.speak) {
+        const text = buildSpeech(d.event);
+        if (text) enqueueTts(window.smolympic.speak(text, ttsVoice));
+      }
     } catch (e) {
       showToast('Swipe failed: {msg}', { msg: e.message });
     }
-  }, [showToast]);
+  }, [showToast, ttsEnabled, ttsVoice, enqueueTts]);
 
   // Hardware bridge: real reader events arrive through Electron's preload.
   useEffect(() => {
@@ -515,6 +561,11 @@ function Dashboard() {
           onViewMember={(id) => { setFocusMemberId(id); setRoute('customers'); dismissPopup(); }} />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
+      <button type="button" className={`icon-btn tts-toggle-btn ${ttsEnabled ? '' : 'muted'} ${ttsAnim || ''}`.trim()} onClick={toggleTts}
+        title={t(ttsEnabled ? 'Mute announcements' : 'Unmute announcements')}
+        aria-label={t(ttsEnabled ? 'Mute announcements' : 'Unmute announcements')}>
+        {ttsEnabled ? <Icons.speaker width="18" height="18" /> : <Icons.speakerMute width="18" height="18" />}
+      </button>
       </ZoomViewport>
     </AppCtx.Provider>
   );

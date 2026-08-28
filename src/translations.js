@@ -184,6 +184,15 @@ export const FR = {
   "Unsaved changes": "Modifications non enregistrées",
   "Discard": "Annuler les modifications",
   "Save changes": "Enregistrer",
+  "Voice announcements": "Annonces vocales",
+  "Announcements": "Annonces",
+  "Speak a welcome message on every card swipe.": "Annonce vocalement un message de bienvenue à chaque passage de badge.",
+  "On": "Activé",
+  "Off": "Désactivé",
+  "Voice": "Voix",
+  "Which French voice reads the announcement.": "Quelle voix française lit l'annonce.",
+  "Mute announcements": "Couper les annonces",
+  "Unmute announcements": "Activer les annonces",
 
   // ── Live status ──
   "Live gym status": "Statut de la salle en direct",

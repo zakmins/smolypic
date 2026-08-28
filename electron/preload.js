@@ -16,4 +16,9 @@ contextBridge.exposeInMainWorld('smolympic', {
   simulateSwipe(rfidUid) {
     ipcRenderer.send('rfid:simulate', rfidUid);
   },
+  // French TTS: synthesizes `text` with the given voice ('male'|'female') via
+  // Piper in the main process and resolves { ok, dataUrl } | { ok: false, error }.
+  speak(text, voice) {
+    return ipcRenderer.invoke('tts:speak', { text, voice });
+  },
 });

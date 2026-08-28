@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { AppCtx } from '../App.jsx';
 import { useTheme } from '../theme.jsx';
 import { useLanguage, LANGUAGES } from '../i18n.jsx';
+import { useTts } from '../tts-settings.jsx';
 import { useAuth } from '../auth.jsx';
 import { Icons } from '../components/atoms.jsx';
 import Select from '../components/Select.jsx';
@@ -26,6 +27,7 @@ function PriceInput({ value, onChange, ...rest }) {
 export default function Settings() {
   const { theme } = useTheme();
   const { language, t } = useLanguage();
+  const { enabled: ttsEnabled, setEnabled: setTtsEnabled, voice: ttsVoice, setVoice: setTtsVoice } = useTts();
   const { currentUser } = useAuth();
   const { pricing, savePricing, savePreferences } = useContext(AppCtx);
   const isAdmin = currentUser?.role === 'admin';
@@ -118,6 +120,33 @@ export default function Settings() {
               </div>
               <div style={{ marginLeft: 'auto', minWidth: 170 }}>
                 <Select value={language} onChange={(l) => savePreferences({ language: l })} ariaLabel={t('Interface language')} options={LANGUAGES} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Voice announcements ── */}
+        <div className="panel">
+          <div className="panel-head"><div className="panel-title">{t('Voice announcements')}</div></div>
+          <div className="panel-body">
+            <div className="set-row">
+              <div>
+                <div className="set-row-title">{t('Announcements')}</div>
+                <div className="set-row-sub">{t('Speak a welcome message on every card swipe.')}</div>
+              </div>
+              <div className="chip-row" style={{ marginLeft: 'auto' }}>
+                <button type="button" className={`chip ${ttsEnabled ? 'on' : ''}`} onClick={() => setTtsEnabled(true)}>{t('On')}</button>
+                <button type="button" className={`chip ${!ttsEnabled ? 'on' : ''}`} onClick={() => setTtsEnabled(false)}>{t('Off')}</button>
+              </div>
+            </div>
+            <div className="set-row">
+              <div>
+                <div className="set-row-title">{t('Voice')}</div>
+                <div className="set-row-sub">{t('Which French voice reads the announcement.')}</div>
+              </div>
+              <div className="chip-row" style={{ marginLeft: 'auto' }}>
+                <button type="button" className={`chip ${ttsVoice === 'female' ? 'on' : ''}`} onClick={() => setTtsVoice('female')}>{t('Female')}</button>
+                <button type="button" className={`chip ${ttsVoice === 'male' ? 'on' : ''}`} onClick={() => setTtsVoice('male')}>{t('Male')}</button>
               </div>
             </div>
           </div>

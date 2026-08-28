@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
 import { useAuth } from '../auth.jsx';
 import { useT } from '../i18n.jsx';
+import { useTheme } from '../theme.jsx';
+import logoLight from '../assets/logo-light.png';
+import logoDark from '../assets/logo-dark.png';
 
 export default function Login() {
   const t = useT();
+  const { theme } = useTheme();
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -24,7 +28,11 @@ export default function Login() {
 
   return (
     <div className="login-screen">
+      <div className="login-aurora" aria-hidden="true"><span /><span /><span /></div>
       <form className="login-card panel" onSubmit={submit}>
+        <div className="login-brand">
+          <img src={theme === 'dark' ? logoDark : logoLight} alt="Sm'Olympic Gym" />
+        </div>
         <div className="login-head">
           <div className="page-title" style={{ fontSize: 22 }}>{t('Sign in')}</div>
         </div>
