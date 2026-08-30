@@ -6,7 +6,7 @@ import DatePicker from '../components/DatePicker.jsx';
 import { SPORTS, dzd, fmtDate, age, daysRemaining, memberStatus, fmtTime, durationLabel,
   isSubscription, isUnlimitedSub, usesSessionQuota, remainingLabel, pageList,
   insuranceStatus, insuranceDaysLeft, INSURANCE_PRICE, isGoldMember,
-  subPlans } from '../utils.js';
+  subPlans, planDurationLabel, planUnit, planTerms, isExactWeekMatch } from '../utils.js';
 import { api } from '../api.js';
 import { useT } from '../i18n.jsx';
 import Portal from '../components/Portal.jsx';
@@ -512,9 +512,16 @@ const CATEGORIES = [
   { key: 'JUDO', label: 'Judo', sports: ['JUDO'] },
   { key: 'WRESTLING', label: 'Wrestling', sports: ['WRESTLING'] },
 ];
-// A subscription plan's dropdown label: name, price, and session quota.
-const planLabel = (p, t) =>
-  `${p.label} — ${dzd(p.price)}${p.sessions != null ? ` · ${p.sessions} ${t('sess/mo')}` : ''}`;
+// A subscription plan's dropdown label: name, price, and session quota. A
+// week-billed plan's price is a flat total for its whole span, not a monthly
+// rate, so it's shown per its own duration instead of "sess/mo".
+const planLabel = (p, t) => {
+  if (p.unit === 'week') {
+    const sessTxt = p.sessions != null ? ` · ${p.sessions} ${t('sessions')}` : '';
+    return `${p.label} — ${dzd(p.price)} / ${planDurationLabel(p, t)}${sessTxt}`;
+  }
+  return `${p.label} — ${dzd(p.price)}${p.sessions != null ? ` · ${p.sessions} ${t('sess/mo')}` : ''}`;
+};
 const categoryOf = (sports) => {
   const s = new Set(sports || []);
   if (s.has('JUDO')) return 'JUDO';
@@ -529,6 +536,17 @@ const monthlyQuotaOf = (m) => {
   if (m.sessionsTotal == null) return null;
   const months = Math.max(1, Math.round((m.durationDays || 30) / 30));
   return Math.round(m.sessionsTotal / months);
+};
+// Guess which of a category's plans a member is actually on, to pre-select it
+// when editing/renewing. A week plan's sessions/duration are its own flat
+// total/span (not a monthly rate), so it's matched by an exact total+span
+// match rather than the "sessions per month" heuristic month plans use.
+const matchPlan = (list, m) => {
+  const weekMatch = list.find((p) => isExactWeekMatch(p, m));
+  if (weekMatch) return weekMatch;
+  const quota = monthlyQuotaOf(m);
+  const monthMatch = list.find((p) => planUnit(p) === 'month' && p.sessions === quota);
+  return monthMatch || list[0];
 };
 
 const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
@@ -651,6 +669,14 @@ function MemberForm({ member, onClose, onSave }) {
   const months = Math.max(1, Number(f.months) || 1);
   const plans = subPlans(pricing, f.category);
   const selectedPlan = plans.find((p) => p.id === f.planId) || null;
+  // A week-billed plan is a single fixed block — its own duration and total
+  // price, no "Months" multiplier.
+  const { isWeekPlan: rawIsWeekPlan, durationDays: planDurationDays, sessionsTotal: planSessionsTotal } = planTerms(selectedPlan, months);
+  // An edit view can trust "this member is on a week plan" only when the
+  // selected plan is an *exact* match for their own stored terms (matchPlan
+  // above already prefers that match) — never a heuristic guess.
+  const lockedWeekPlan = locked && isExactWeekMatch(selectedPlan, member);
+  const isWeekPlan = lockedWeekPlan || (!locked && rawIsWeekPlan);
 
   // Default / re-sync the selected plan whenever the category or price book changes.
   useEffect(() => {
@@ -658,19 +684,28 @@ function MemberForm({ member, onClose, onSave }) {
     const list = subPlans(pricing, f.category);
     if (!list.length) { setF((x) => (x.planId === null ? x : { ...x, planId: null })); return; }
     if (list.some((p) => p.id === f.planId)) return;
-    const quota = member ? monthlyQuotaOf(member) : undefined;
-    const pick = (member ? list.find((p) => p.sessions === quota) : null) || list[0];
+    const pick = member ? matchPlan(list, member) : list[0];
     setF((x) => ({ ...x, planId: pick.id }));
   }, [pricing, f.category]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // For a new member, keep the monthly price in step with the chosen plan
-  // (still editable as a manual override).
+  // For a new member, keep the price in step with the chosen plan (still
+  // editable as a manual override) — and for a month plan, default the number
+  // of months to the plan's own configured length.
   useEffect(() => {
     if (member || !selectedPlan) return;
-    setF((x) => ({ ...x, monthlyPrice: selectedPlan.price }));
+    setF((x) => ({
+      ...x,
+      monthlyPrice: selectedPlan.price,
+      months: planUnit(selectedPlan) === 'week' ? x.months : (selectedPlan.duration || 1),
+    }));
   }, [member, selectedPlan]);
   const monthly = Math.max(0, Number(f.monthlyPrice) || 0);
-  const rawTotal = months * monthly;
+  // f.monthlyPrice reconstructs a "per month" figure from amountPaid/months —
+  // exactly right for the classic month display, but meaningless for a locked
+  // week-plan view (its flat total isn't amountPaid/months). Show what was
+  // actually paid there instead.
+  const displayPrice = lockedWeekPlan ? (member.amountPaid || 0) : monthly;
+  const rawTotal = isWeekPlan ? displayPrice : months * monthly;
   const discountAmt = discount === '' ? 0 : Math.min(rawTotal, Math.max(0, Number(discount) || 0));
   const total = Math.max(0, rawTotal - discountAmt);
   // Default the deposit to the full total; it tracks the total until manually set.
@@ -693,14 +728,14 @@ function MemberForm({ member, onClose, onSave }) {
   const submit = () => {
     if (!f.name.trim()) return;
     const category = CATEGORIES.find((c) => c.key === f.category) || CATEGORIES[0];
-    const durationDays = locked ? member.durationDays : months * 30;
+    const durationDays = locked ? member.durationDays : planDurationDays;
     const start = member?.subStart ?? new Date().toISOString().slice(0, 19);
     const end = new Date(new Date(start).getTime() + durationDays * 86400000).toISOString().slice(0, 19);
-    // A plan with a session quota ⇒ metered (sessions × months); an unlimited
-    // plan (sessions = null) carries no quota (NULL). Editing keeps the quota
-    // that was set at signup/renewal — only the remaining count can be adjusted.
-    const perMonth = selectedPlan && selectedPlan.sessions != null ? selectedPlan.sessions : null;
-    const sessionsTotal = locked ? member.sessionsTotal : (perMonth != null ? perMonth * months : null);
+    // A plan with a session quota ⇒ metered (a week plan's quota is already its
+    // total; a month plan's is per month × months); unlimited (null) ⇒ no quota.
+    // Editing keeps the quota that was set at signup/renewal — only the
+    // remaining count can be adjusted.
+    const sessionsTotal = locked ? member.sessionsTotal : planSessionsTotal;
     const sessionsLeft = locked
       ? (sessionsTotal == null ? null : Math.round(Number(f.sessionsLeft) || 0))
       : sessionsTotal;
@@ -754,9 +789,14 @@ function MemberForm({ member, onClose, onSave }) {
               <input data-rfid-capture value={f.rfidUid} onChange={(e) => set('rfidUid', e.target.value)}
                 placeholder={t('Click here, then scan the tag')} /></div>
 
-            <div className="field"><label>{t('Months')}</label>
-              <input type="number" min="1" value={f.months} disabled={locked} onFocus={(e) => e.target.select()}
-                onChange={(e) => set('months', e.target.value === '' ? '' : Number(e.target.value))} /></div>
+            {isWeekPlan ? (
+              <div className="field"><label>{t('Duration')}</label>
+                <input disabled value={planDurationLabel(selectedPlan, t)} /></div>
+            ) : (
+              <div className="field"><label>{t('Months')}</label>
+                <input type="number" min="1" value={f.months} disabled={locked} onFocus={(e) => e.target.select()}
+                  onChange={(e) => set('months', e.target.value === '' ? '' : Number(e.target.value))} /></div>
+            )}
             <div className="field full"><label>{t('Subscription plan')}</label>
               {plans.length ? (
                 <Select value={f.planId || ''} onChange={(v) => set('planId', v)} ariaLabel={t('Subscription plan')}
@@ -766,8 +806,8 @@ function MemberForm({ member, onClose, onSave }) {
                   {t('No plans for this category — add one in Settings.')}
                 </div>
               )}</div>
-            <div className="field"><label>{t('Monthly price (DZD)')}</label>
-              <input type="number" min="0" value={f.monthlyPrice} disabled={locked} onFocus={(e) => e.target.select()}
+            <div className="field"><label>{isWeekPlan ? t('Total price (DZD)') : t('Monthly price (DZD)')}</label>
+              <input type="number" min="0" value={lockedWeekPlan ? displayPrice : f.monthlyPrice} disabled={locked} onFocus={(e) => e.target.select()}
                 onChange={(e) => set('monthlyPrice', e.target.value === '' ? '' : Number(e.target.value))} /></div>
             {!member && (
               <div className="field"><label>{t('Discount (DZD)')}</label>
@@ -801,9 +841,13 @@ function MemberForm({ member, onClose, onSave }) {
             <div className="field"><label>{t('Total')}</label>
               <input disabled value={dzd(total)} style={{ color: 'var(--accent)', fontWeight: 800 }} />
               <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>
-                {discountAmt > 0
-                  ? t('({months} mo × {monthly} − {discount} discount)', { months, monthly, discount: discountAmt })
-                  : t('({months} mo × {monthly})', { months, monthly })}
+                {isWeekPlan
+                  ? (discountAmt > 0
+                      ? t('({amount} − {discount} discount)', { amount: dzd(displayPrice), discount: dzd(discountAmt) })
+                      : t('({duration} flat rate)', { duration: planDurationLabel(selectedPlan, t) }))
+                  : discountAmt > 0
+                    ? t('({months} mo × {monthly} − {discount} discount)', { months, monthly, discount: discountAmt })
+                    : t('({months} mo × {monthly})', { months, monthly })}
               </div></div>
 
             <div className="field"><label>{t('Insurance')}</label>
@@ -828,7 +872,13 @@ function MemberForm({ member, onClose, onSave }) {
 function RenewForm({ member: m, onClose, onSave }) {
   const t = useT();
   const { pricing } = useContext(AppCtx);
-  const category = categoryOf(m.sports);
+  const originalCategory = categoryOf(m.sports);
+  // Renewal is also when the gym-family types are switched between each other
+  // (e.g. GYM ⇄ GYM + CARDIO) — offered only among those, never for a Judo/
+  // Wrestling member (a separate membership, not interchangeable this way).
+  const RENEW_TYPES = CATEGORIES.filter((c) => c.key !== 'JUDO' && c.key !== 'WRESTLING').map((c) => c.key);
+  const canChangeType = RENEW_TYPES.includes(originalCategory);
+  const [category, setCategory] = useState(originalCategory);
   const [months, setMonths] = useState(1);
   const [planId, setPlanId] = useState(null);
   const [amount, setAmount] = useState(2500);   // sticker price, before any discount
@@ -839,20 +889,32 @@ function RenewForm({ member: m, onClose, onSave }) {
   const [paidNow, setPaidNow] = useState(null);
   const plans = subPlans(pricing, category);
   const selectedPlan = plans.find((p) => p.id === planId) || null;
-  // Default the plan (match the member's current quota where possible) on load.
+  // A week-billed plan is a single fixed block — its own duration and total
+  // price, no "Months" multiplier.
+  const { isWeekPlan, durationDays: planDurationDays, sessionsTotal: planSessionsTotal } = planTerms(selectedPlan, months);
+  // Default the plan (match the member's current plan where possible) on load.
+  // A category with no configured plans at all resets the price too — renewing
+  // into it is an explicit unmetered/manual entry, never a stale leftover amount
+  // carried over from whatever plan was selected before.
   useEffect(() => {
     if (!pricing) return;
     const list = subPlans(pricing, category);
-    if (!list.length) { setPlanId(null); return; }
+    if (!list.length) { setPlanId(null); setAmount(0); return; }
     if (list.some((p) => p.id === planId)) return;
-    const quota = monthlyQuotaOf(m);
-    setPlanId((list.find((p) => p.sessions === quota) || list[0]).id);
+    setPlanId(matchPlan(list, m).id);
   }, [pricing, category]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // For a month plan, default the number of months to the plan's own
+  // configured length (still editable) whenever a different plan is chosen.
+  useEffect(() => {
+    if (!selectedPlan || planUnit(selectedPlan) === 'week') return;
+    setMonths(selectedPlan.duration || 1);
+  }, [selectedPlan]);
   // Suggest the configured price for the chosen plan + period (still editable).
+  // A week plan's price is already the full amount for its fixed block.
   useEffect(() => {
     if (!selectedPlan) return;
-    setAmount(selectedPlan.price * Math.max(1, months));
-  }, [selectedPlan, months]);
+    setAmount(isWeekPlan ? selectedPlan.price : selectedPlan.price * Math.max(1, months));
+  }, [selectedPlan, months, isWeekPlan]);
 
   // The full fee for this renewal, the deposit collected now, and the shortfall.
   // paidNow holds the raw field text ('' while cleared) — see the matching note
@@ -871,12 +933,14 @@ function RenewForm({ member: m, onClose, onSave }) {
   }, [total]);
 
   const submit = () => {
-    // Extend the date and apply the chosen plan for the renewed period. A plan
-    // with a session quota ⇒ metered (sessions × months); unlimited ⇒ no quota.
-    const mo = Math.max(1, Number(months) || 1);
-    const perMonth = selectedPlan && selectedPlan.sessions != null ? selectedPlan.sessions : null;
-    const sessionsTotal = perMonth != null ? perMonth * mo : null;
-    onSave({ days: mo * 30, applyPlan: true, sessionsTotal, amount: paid, total, method: 'Cash' });
+    // Extend the date and apply the chosen plan for the renewed period. A week
+    // plan's quota/duration are already its own total/span; a month plan's
+    // scale with the chosen number of months. Either way, an unlimited plan
+    // (sessions null) carries no quota.
+    const sports = category !== originalCategory
+      ? (CATEGORIES.find((c) => c.key === category) || CATEGORIES[0]).sports
+      : undefined;
+    onSave({ days: planDurationDays, applyPlan: true, sessionsTotal: planSessionsTotal, amount: paid, total, method: 'Cash', sports });
   };
 
   return (
@@ -889,9 +953,25 @@ function RenewForm({ member: m, onClose, onSave }) {
         </div>
         <div className="modal-body">
           <div className="form-grid">
-            <div className="field"><label>{t('Months')}</label>
-              <input type="number" min="1" value={months} onFocus={(e) => e.target.select()}
-                onChange={(e) => setMonths(e.target.value === '' ? '' : Number(e.target.value))} /></div>
+            {canChangeType && (
+              <div className="field full"><label>{t('Membership type')}</label>
+                <div className="chip-row">
+                  {RENEW_TYPES.map((key) => (
+                    <button key={key} type="button" className={`chip ${category === key ? 'on' : ''}`}
+                      onClick={() => setCategory(key)}>
+                      {t(CATEGORIES.find((c) => c.key === key).label)}
+                    </button>
+                  ))}
+                </div></div>
+            )}
+            {isWeekPlan ? (
+              <div className="field"><label>{t('Duration')}</label>
+                <input disabled value={planDurationLabel(selectedPlan, t)} /></div>
+            ) : (
+              <div className="field"><label>{t('Months')}</label>
+                <input type="number" min="1" value={months} onFocus={(e) => e.target.select()}
+                  onChange={(e) => setMonths(e.target.value === '' ? '' : Number(e.target.value))} /></div>
+            )}
             <div className="field"><label>{t('Amount (DZD)')}</label>
               <input type="number" min="0" value={amount} onFocus={(e) => e.target.select()}
                 onChange={(e) => setAmount(e.target.value === '' ? '' : Number(e.target.value))} /></div>
@@ -901,11 +981,15 @@ function RenewForm({ member: m, onClose, onSave }) {
             <div className="field"><label>{t('Balance due')}</label>
               <input disabled value={dzd(balance)}
                 style={balance > 0 ? { color: 'var(--red)', fontWeight: 700 } : undefined} /></div>
-            {plans.length > 0 && (
-              <div className="field full"><label>{t('Subscription plan')}</label>
+            <div className="field full"><label>{t('Subscription plan')}</label>
+              {plans.length ? (
                 <Select value={planId || ''} onChange={(v) => setPlanId(v)} ariaLabel={t('Subscription plan')}
-                  options={plans.map((p) => [p.id, planLabel(p, t)])} /></div>
-            )}
+                  options={plans.map((p) => [p.id, planLabel(p, t)])} />
+              ) : (
+                <div style={{ marginTop: 9, fontSize: 13, color: 'var(--muted)', fontWeight: 500 }}>
+                  {t('No plans for this category — add one in Settings.')}
+                </div>
+              )}</div>
             {m.sessionsLeft < 0 && (
               <div className="field full" style={{ fontSize: 12.5, color: 'var(--amber)', fontWeight: 600 }}>
                 {t('{n} owed session(s) will be deducted from the new quota.', { n: -m.sessionsLeft })}

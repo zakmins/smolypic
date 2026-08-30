@@ -7,7 +7,7 @@ import { useAuth } from '../auth.jsx';
 import { Icons } from '../components/atoms.jsx';
 import Select from '../components/Select.jsx';
 import Portal from '../components/Portal.jsx';
-import { dzd } from '../utils.js';
+import { dzd, planDurationLabel, planUnit } from '../utils.js';
 
 const CATEGORY_LABEL = { GYM: 'Gym', CARDIO: 'Cardio', GYM_CARDIO: 'Gym + Cardio', JUDO: 'Judo', WRESTLING: 'Wrestling' };
 // CATEGORY_LABEL is translated at render via t().
@@ -18,7 +18,8 @@ const money = (v) => Math.max(0, Math.round(Number(v) || 0));
 function PriceInput({ value, onChange, ...rest }) {
   return (
     <div className="price-input">
-      <input type="number" min="0" value={value} onChange={(e) => onChange(money(e.target.value))} {...rest} />
+      <input type="number" min="0" value={value} onFocus={(e) => e.target.select()}
+        onChange={(e) => onChange(money(e.target.value))} {...rest} />
       <span>DZD</span>
     </div>
   );
@@ -218,15 +219,16 @@ export default function Settings() {
                 <div className="sub-list-scroll">
                   <table className="table">
                     <thead>
-                      <tr><th>{t('Category')}</th><th>{t('Plan name')}</th><th>{t('Sessions')}</th><th>{t('Monthly price')}</th></tr>
+                      <tr><th>{t('Category')}</th><th>{t('Plan name')}</th><th>{t('Duration')}</th><th>{t('Sessions')}</th><th>{t('Price')}</th></tr>
                     </thead>
                     <tbody>
                       {subRows.map((p) => (
                         <tr key={p.id} onClick={() => setSelectedSub(p.id)}>
                           <td>{t(CATEGORY_LABEL[p.category])}</td>
                           <td style={{ fontWeight: 600 }}>{p.label}</td>
+                          <td className="mono num">{planDurationLabel(p, t)}</td>
                           <td className="mono num">{p.sessions != null ? p.sessions : t('Unlimited')}</td>
-                          <td className="mono num">{dzd(p.price)}</td>
+                          <td className="mono num">{dzd(p.price)}{p.unit === 'week' ? '' : ` / ${t('mo')}`}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -262,7 +264,15 @@ export default function Settings() {
 }
 
 // Shared editable fields for a subscription (create modal + drawer edit mode).
+// A plan is billed either by the month (a recurring rate, sessions = per
+// month — unchanged from before) or by the week (a flat price for a fixed
+// span, sessions = the total for that whole span).
 function SubFields({ value, onChange, t }) {
+  const unit = planUnit(value);
+  // Duration/sessions/price mean something different under each unit (a rate
+  // vs. a flat total) — switching units resets them rather than silently
+  // reinterpreting whatever numbers were typed for the old one.
+  const setUnit = (v) => onChange({ ...value, unit: v, duration: 1, sessions: null, price: 0 });
   return (
     <div className="form-grid">
       <div className="field full"><label>{t('Category')}</label>
@@ -271,11 +281,17 @@ function SubFields({ value, onChange, t }) {
       <div className="field full"><label>{t('Plan name')}</label>
         <input value={value.label} placeholder={t('e.g. 3× / week')}
           onChange={(e) => onChange({ ...value, label: e.target.value })} /></div>
-      <div className="field"><label>{t('Sessions / month')}</label>
-        <input type="number" min="1" value={value.sessions ?? ''} placeholder={t('Unlimited')}
+      <div className="field"><label>{t('Billed by')}</label>
+        <Select value={unit} onChange={setUnit} ariaLabel={t('Billed by')}
+          options={[['month', t('Month')], ['week', t('Week')]]} /></div>
+      <div className="field"><label>{unit === 'week' ? t('How many weeks') : t('How many months')}</label>
+        <input type="number" min="1" value={value.duration ?? 1} onFocus={(e) => e.target.select()}
+          onChange={(e) => onChange({ ...value, duration: Math.max(1, Math.round(Number(e.target.value) || 1)) })} /></div>
+      <div className="field"><label>{unit === 'week' ? t('Sessions (total)') : t('Sessions / month')}</label>
+        <input type="number" min="1" value={value.sessions ?? ''} placeholder={t('Unlimited')} onFocus={(e) => e.target.select()}
           onChange={(e) => onChange({ ...value, sessions: e.target.value === '' ? null : Math.max(1, Math.round(Number(e.target.value) || 0)) })} /></div>
-      <div className="field"><label>{t('Monthly price (DZD)')}</label>
-        <input type="number" min="0" value={value.price}
+      <div className="field"><label>{unit === 'week' ? t('Total price (DZD)') : t('Monthly price (DZD)')}</label>
+        <input type="number" min="0" value={value.price} onFocus={(e) => e.target.select()}
           onChange={(e) => onChange({ ...value, price: money(e.target.value) })} /></div>
     </div>
   );
@@ -310,8 +326,10 @@ function SubDrawer({ sub, onClose, onSave, onDelete }) {
                 <div className="kv">
                   <span className="k">{t('Category')}</span><span className="v">{t(CATEGORY_LABEL[sub.category])}</span>
                   <span className="k">{t('Plan name')}</span><span className="v">{sub.label}</span>
-                  <span className="k">{t('Sessions / month')}</span><span className="v">{sub.sessions != null ? t('{n} sessions', { n: sub.sessions }) : t('Unlimited')}</span>
-                  <span className="k">{t('Monthly price')}</span><span className="v mono">{dzd(sub.price)}</span>
+                  <span className="k">{t('Duration')}</span><span className="v">{planDurationLabel(sub, t)}</span>
+                  <span className="k">{sub.unit === 'week' ? t('Sessions (total)') : t('Sessions / month')}</span>
+                  <span className="v">{sub.sessions != null ? t('{n} sessions', { n: sub.sessions }) : t('Unlimited')}</span>
+                  <span className="k">{sub.unit === 'week' ? t('Total price') : t('Monthly price')}</span><span className="v mono">{dzd(sub.price)}</span>
                 </div>
               </>
             )}
@@ -338,7 +356,7 @@ function SubDrawer({ sub, onClose, onSave, onDelete }) {
 // Modal to create a new subscription.
 function SubCreateModal({ onClose, onCreate }) {
   const { t } = useLanguage();
-  const [v, setV] = useState({ category: 'GYM', label: '', sessions: null, price: 0 });
+  const [v, setV] = useState({ category: 'GYM', label: '', unit: 'month', duration: 1, sessions: null, price: 0 });
   const valid = v.label.trim() !== '';
   return (
     <Portal>

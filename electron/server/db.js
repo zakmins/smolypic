@@ -252,10 +252,18 @@ function normalizePricing(input) {
   // per-tier object ({ GYM: { 2, 3, 4, unlimited, monthly } }) — on read.
   const normPlan = (p, i) => {
     const n = Math.round(Number(p && p.sessions));
+    const unit = (p && p.unit) === 'week' ? 'week' : 'month';
+    const dur = Math.round(Number(p && p.duration));
     return {
       id: String((p && p.id) || `sub-${i}`),
       category: SUB_CATS.includes(p && p.category) ? p.category : 'GYM',
       label: String((p && p.label) || `Plan ${i + 1}`),
+      // Billed by the month (a recurring rate, sessions/price scale with a
+      // separately chosen number of months) or by the week (a flat price and
+      // total session count for one fixed block of `duration` weeks). Plans
+      // saved before this split default to month/1, preserving their old meaning.
+      unit,
+      duration: Number.isFinite(dur) && dur > 0 ? dur : 1,
       sessions: Number.isFinite(n) && n > 0 ? n : null,
       price: toMoney(p && p.price, 0),
     };

@@ -101,6 +101,33 @@ export const defaultSessionPrice = (pricing) =>
 export const subPlans = (pricing, category) =>
   (pricing && Array.isArray(pricing.subscriptions))
     ? pricing.subscriptions.filter((p) => p.category === category) : [];
+// A plan's billing unit. Defaults to 'month' for legacy plans saved before the
+// week/month split existed, and for anything else invalid/missing.
+export const planUnit = (p) => (p?.unit === 'week' ? 'week' : 'month');
+// A plan's billing period as words: "1 month" / "6 weeks".
+export const planDurationLabel = (p, t) => {
+  const n = Math.max(1, Math.round(Number(p?.duration) || 1));
+  const unit = planUnit(p);
+  return t(n === 1 ? `{n} ${unit}` : `{n} ${unit}s`, { n });
+};
+// True when `plan` is a week plan whose flat total/span exactly match a
+// member's own stored duration/sessions — the only case it's safe to display
+// a locked/edit view as "on this week plan" rather than guessing.
+export const isExactWeekMatch = (plan, m) =>
+  !!plan && planUnit(plan) === 'week' && plan.sessions === m.sessionsTotal && (plan.duration || 1) * 7 === m.durationDays;
+// Resolve the actual duration/session quota a plan produces, given the number
+// of months chosen (only relevant to a month plan — a week plan is a single
+// fixed block, its own duration/sessions apply as-is, never multiplied).
+export const planTerms = (plan, months) => {
+  const isWeekPlan = planUnit(plan) === 'week';
+  const mo = Math.max(1, Number(months) || 1);
+  const durationDays = plan
+    ? (isWeekPlan ? (plan.duration || 1) * 7 : mo * 30)
+    : mo * 30;
+  const perUnit = plan && plan.sessions != null ? plan.sessions : null;
+  const sessionsTotal = perUnit != null ? (isWeekPlan ? perUnit : perUnit * mo) : null;
+  return { isWeekPlan, durationDays, sessionsTotal };
+};
 export const insuranceStatus = (m) => {
   if (!m.insurance) return 'none';
   if (!m.insuranceExpiry) return 'active';                       // enrolled, legacy without an expiry

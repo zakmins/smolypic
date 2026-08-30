@@ -60,7 +60,7 @@ export default function Users() {
       await load();
       setEditing(null);
       flash(id != null ? t('User updated') : t('Coach added'));
-    } catch (e) { flash(t('Save failed: {message}', { message: e.message })); }
+    } catch (e) { flash(t('Save failed: {msg}', { msg: e.message })); }
   };
 
   const remove = async (u) => {
@@ -69,7 +69,7 @@ export default function Users() {
       await load();
       setConfirmDelete(null); setSelected(null);
       flash(t('Coach deleted'));
-    } catch (e) { flash(t('Delete failed: {message}', { message: e.message })); }
+    } catch (e) { flash(t('Delete failed: {msg}', { msg: e.message })); }
   };
 
   const sel = selected != null ? users.find((u) => u.id === selected) : null;

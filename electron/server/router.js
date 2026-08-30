@@ -653,11 +653,21 @@ function renewMember(db, { params, body, user }) {
   // what lets a later void restore exactly, rather than guessing an inverse.
   const before = {
     sub_start: m.sub_start, sub_end: m.sub_end, duration_days: m.duration_days,
-    sessions_total: m.sessions_total, sessions_left: m.sessions_left, balance: m.balance,
+    sessions_total: m.sessions_total, sessions_left: m.sessions_left, balance: m.balance, sports: m.sports,
   };
   const after = { ...before };
   // A renewal can extend the date, top up sessions, or (for metered subs) both.
   const parts = [];
+  // Renewal is also the moment a member can switch membership type (e.g. GYM ⇄
+  // GYM + CARDIO) — only applied when it actually differs from the current one.
+  if (body.sports) {
+    const sportsJson = JSON.stringify(body.sports);
+    if (sportsJson !== m.sports) {
+      after.sports = sportsJson;
+      db.prepare('UPDATE members SET sports=? WHERE id=?').run(sportsJson, id);
+      parts.push(`type changed to ${body.sports.join(' + ')}`);
+    }
+  }
   if (body.days) {
     const base = Math.max(now.getTime(), ms(m.sub_end));
     // sub_start moves to the same anchor: it should read as "start of the
@@ -708,7 +718,7 @@ function renewMember(db, { params, body, user }) {
   if (amount) {
     const snap = JSON.stringify({ before, after });
     db.prepare('INSERT INTO payments (member_id,amount,kind,sport,method,date,created_by,member_snapshot) VALUES (?,?,?,?,?,?,?,?)')
-      .run(id, amount, kind, JSON.parse(m.sports)[0], 'Cash', iso(now), user.id, snap);
+      .run(id, amount, kind, JSON.parse(after.sports)[0], 'Cash', iso(now), user.id, snap);
   }
   logActivity(db, user.id, 'member.renew', m.name, detail + (amount ? ` (${amount} DZD)` : ''));
   return memberRowToDict(db, getMember(db, id));

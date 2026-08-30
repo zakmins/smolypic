@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Icons } from './atoms.jsx';
 import { zoomTransform } from './ZoomViewport.jsx';
+import { useT } from '../i18n.jsx';
 
 // Custom, theme-matched dropdown — a styled trigger + a portaled options list
 // (portaled so a scroll container can't clip it). Drop-in for a native <select>:
@@ -9,7 +10,13 @@ import { zoomTransform } from './ZoomViewport.jsx';
 
 const norm = (options) => options.map((o) => (Array.isArray(o) ? { value: o[0], label: o[1] } : o));
 
-export default function Select({ value, onChange, options, ariaLabel, width, placeholder = 'Select…', disabled = false }) {
+// `placeholder`: omit it to get the component's own default ("Select…"),
+// translated internally. Pass one explicitly and it's shown as-is — the
+// caller's job to translate it, exactly like `ariaLabel` — so a dynamic or
+// already-translated string a caller passes never gets silently re-translated.
+export default function Select({ value, onChange, options, ariaLabel, width, placeholder, disabled = false }) {
+  const t = useT();
+  const resolvedPlaceholder = placeholder ?? t('Select…');
   const opts = norm(options);
   const [open, setOpen] = useState(false);
   const triggerRef = useRef(null);
@@ -90,7 +97,7 @@ export default function Select({ value, onChange, options, ariaLabel, width, pla
     <div className="sel" style={width ? { width } : undefined}>
       <button type="button" ref={triggerRef} className={`sel-trigger${open ? ' open' : ''}`} disabled={disabled}
         onClick={() => setOpen((o) => !o)} aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel}>
-        <span className={current ? 'sel-val' : 'sel-placeholder'}>{current ? current.label : placeholder}</span>
+        <span className={current ? 'sel-val' : 'sel-placeholder'}>{current ? current.label : resolvedPlaceholder}</span>
         <Icons.chevron width="15" height="15" className="sel-caret" />
       </button>
       {!disabled && pop}
