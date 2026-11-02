@@ -154,6 +154,19 @@ export const fmtStockQty = (it) => (isWeightItem(it) ? fmtWeight(it.qty) : Strin
 export const buyPerKg = (it) => Math.round((Number(it.buy) || 0) * 1000);
 export const initials = (name) => name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase();
 export const fmtDate = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+// Display the "last valid day" rather than the renewal date itself. sub_end is the
+// exclusive renewal day in the database, so the UI should show the final day the
+// member is still active. Keep the raw stored value untouched for all business logic.
+export const subEndDisplay = (m) => {
+  if (!m?.subEnd) return m?.subEnd ?? null;
+  const raw = String(m.subEnd).slice(0, 10);
+  if (!raw || raw === 'null' || raw === 'undefined') return null;
+  const d = new Date(`${raw}T00:00:00`);
+  d.setDate(d.getDate() - 1);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
 export const fmtTime = (ts) => new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 export const age = (dob) => Math.floor((Date.now() - new Date(dob)) / (365.25 * 86400000));
 export const hhmmss = (ms) => {

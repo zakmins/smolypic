@@ -292,6 +292,10 @@ input::placeholder { color: var(--faint); }
 }
 .btn:hover { background: var(--line); }
 .btn:active { transform: translateY(1px); }
+.btn:disabled, .btn[disabled] {
+  opacity: 0.45; cursor: not-allowed; pointer-events: none;
+  box-shadow: none;
+}
 .btn.primary {
   background: var(--grad); border: none; color: var(--on-accent); font-weight: 800;
   box-shadow: 0 8px 22px var(--accent-glow);
@@ -402,7 +406,7 @@ input::placeholder { color: var(--faint); }
 /* ── Live board ── */
 .live-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 18px; align-items: start; }
 .live-row {
-  display: grid; grid-template-columns: 46px 1fr auto auto; gap: 12px;
+  display: grid; grid-template-columns: 22px 46px minmax(0, 1fr) auto auto; gap: 10px;
   align-items: center; padding: 12px 20px;
   border-bottom: 1px solid var(--line);
   transition: background 0.12s;

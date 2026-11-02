@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python seed.py)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/login -H \"Content-Type: application/json\" -d '{\"username\":\"smail\",\"password\":\"smail\"}')",
+      "Bash(npm run *)",
+      "Bash(python -m uvicorn main:app --port 8000)",
+      "Read(//tmp/**)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('role',d['user']['role'],'color',d['user']['color']\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:8000/api/bootstrap)",
+      "Bash(echo \"server PID: $!\")",
+      "Bash(npm install *)",
+      "Bash(node -e \"console.log\\('electron', require\\('./node_modules/electron/package.json'\\).version\\)\")",
+      "Bash(curl -s -o /dev/null -w \"github: %{http_code}\\\\n\" --max-time 8 https://github.com/WiseLibs/better-sqlite3/releases)",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/better-sqlite3/package.json'\\).version\\)\")",
+      "Bash(node -e \"const p=require\\('./node_modules/better-sqlite3/package.json'\\); console.log\\(JSON.stringify\\(p.binary||'no binary field'\\)\\); console.log\\('deps:', Object.keys\\(p.dependencies||{}\\)\\)\")",
+      "Bash(node -e \"try{require\\('prebuild-install'\\);console.log\\('prebuild-install available'\\)}catch\\(e\\){console.log\\('no prebuild-install:',e.message\\)}\")",
+      "Bash(npx --yes prebuild-install -r node -t 20.11.1)",
+      "Bash(npx --yes prebuild-install -r electron -t 31.7.7)",
+      "Bash(node -e \"const D=require\\('better-sqlite3'\\); const db=new D\\(':memory:'\\); db.exec\\('CREATE TABLE t\\(x\\)'\\); db.prepare\\('INSERT INTO t VALUES \\(?\\)'\\).run\\(42\\); console.log\\('OK row=', db.prepare\\('SELECT x FROM t'\\).get\\(\\).x\\)\")",
+      "Bash(node -e \"const D=require\\('better-sqlite3'\\); const db=new D\\(':memory:'\\); db.exec\\('CREATE TABLE t\\(x\\)'\\); db.prepare\\('INSERT INTO t VALUES \\(?\\)'\\).run\\(42\\); console.log\\('node binary OK, row=', db.prepare\\('SELECT x FROM t'\\).get\\(\\).x\\)\")",
+      "Bash(node *)",
+      "Bash(npx --yes prebuild-install -r electron -t 31.7.7 --verbose)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(timeout 60 npx electron electron/_abicheck.js)",
+      "Bash(npx --yes prebuild-install -r node -t 20.11.1 --verbose)",
+      "Bash(taskkill //F //IM electron.exe)",
+      "Bash(timeout 60 npx electron electron/_check.js)",
+      "PowerShell(npm run *)",
+      "Bash(grep -iE \"^\\(sharp|jimp|pngjs|upng|pixelmatch\\)$\")",
+      "Bash(npx vite *)",
+      "Bash(grep -iv \"import\\\\|//\")",
+      "Bash(grep -nE \"\\\\\"[A-Za-z]{3,}|'[A-Za-z]{3,}|>[A-Z][a-z]+\" src/charts/Charts.jsx)",
+      "Bash(git rm *)",
+      "Bash(echo \"exit:$?\")",
+      "PowerShell(git add *)"
+    ]
+  }
+}

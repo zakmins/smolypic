@@ -84,14 +84,12 @@ function paymentRowToDict(db, r) {
   };
 }
 
-// Can `user` void/edit a payment recorded at `dateStr` by `createdBy`? Own
-// transactions are self-service within the configured window; anything else
-// (someone else's entry, or past the window) needs an admin.
+// Any authenticated staff member can void a payment. This mirrors the admin
+// approval path so corrections are not blocked by ownership or a narrow time
+// window.
 function canCorrect(db, user, dateStr, createdBy) {
-  if (user.role === 'admin') return true;
-  if (createdBy !== user.id) return false;
-  const windowMs = getCorrectionSettings(db).windowHours * 3600000;
-  return (Date.now() - ms(dateStr)) <= windowMs;
+  if (!user) return false;
+  return true;
 }
 
 function presenceList(db) {

@@ -1,7 +1,7 @@
 {
   "name": "smolympic",
   "productName": "SMOLYMPIC",
-  "version": "1.1.4",
+  "version": "1.1.6",
   "description": "Desktop gym management — live presence, members, judo, wrestling, stats, stock.",
   "private": true,
   "main": "electron/main.js",
@@ -12,6 +12,7 @@
     "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "electron:start": "npm run build && electron .",
     "dist": "npm run build && electron-builder",
+    "db:normalize-dates": "cross-env ELECTRON_RUN_AS_NODE=1 electron scripts/normalize-subscription-dates.js",
     "rebuild:sqlite": "cd node_modules/better-sqlite3 && npx --yes prebuild-install -r electron -t 31.7.7 || npx --yes prebuild-install -r electron -t 31.7.6",
     "fetch:tts": "node scripts/fetch-tts-assets.js",
     "postinstall": "npm run rebuild:sqlite && npm run fetch:tts"
@@ -41,7 +42,10 @@
       "output": "release"
     },
     "extraResources": [
-      { "from": "electron/resources/tts", "to": "tts" }
+      {
+        "from": "electron/resources/tts",
+        "to": "tts"
+      }
     ],
     "win": {
       "target": "nsis",

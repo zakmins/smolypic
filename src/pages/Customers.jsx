@@ -3,7 +3,7 @@ import { AppCtx } from '../App.jsx';
 import { Avatar, SportBadge, MembershipBadge, Icons } from '../components/atoms.jsx';
 import Select from '../components/Select.jsx';
 import DatePicker from '../components/DatePicker.jsx';
-import { SPORTS, dzd, fmtDate, age, daysRemaining, memberStatus, fmtTime, durationLabel,
+import { SPORTS, dzd, fmtDate, subEndDisplay, age, daysRemaining, memberStatus, fmtTime, durationLabel,
   isSubscription, isUnlimitedSub, usesSessionQuota, remainingLabel, pageList,
   insuranceStatus, insuranceDaysLeft, INSURANCE_PRICE, isGoldMember,
   subPlans, planDurationLabel, planUnit, planTerms, isExactWeekMatch } from '../utils.js';
@@ -133,7 +133,7 @@ export default function Customers() {
                     <td className="mono num" style={{ color: s === 'expired' ? 'var(--red)' : 'var(--text)' }}>
                       {remainingLabel(m)}
                     </td>
-                    <td className="mono">{fmtDate(m.subEnd)}</td>
+                    <td className="mono">{fmtDate(subEndDisplay(m))}</td>
                     <td>{m.gender === 'M' ? t('Male') : t('Female')}</td>
                     <td>{m.insurance ? <span className="badge green">✓</span> : <span className="badge neutral">✗</span>}</td>
                     <td className="mono num">
@@ -299,7 +299,7 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
             <span className="k">{t('Gender')}</span><span className="v">{m.gender === 'M' ? t('Male') : t('Female')}</span>
             {m.bloodType && <><span className="k">{t('Blood type')}</span><span className="v">{m.bloodType}</span></>}
             <span className="k">{t('RFID tag')}</span><span className="v mono">{m.rfidUid}</span>
-            <span className="k">{t('Subscription')}</span><span className="v">{fmtDate(m.subStart)} → {fmtDate(m.subEnd)}</span>
+            <span className="k">{t('Subscription')}</span><span className="v">{fmtDate(m.subStart)} → {fmtDate(subEndDisplay(m))}</span>
             {isSubscription(m) && <><span className="k">{t('Access')}</span><span className="v">{isUnlimitedSub(m) ? t('Unlimited') : t('Metered — {left} / {total} sessions', { left: m.sessionsLeft, total: m.sessionsTotal })}</span></>}
             <span className="k">{t('Amount paid')}</span><span className="v mono">{dzd(m.amountPaid)}</span>
             {m.balance > 0 && <><span className="k">{t('Balance due')}</span><span className="v mono" style={{ color: 'var(--red)', fontWeight: 700 }}>{dzd(m.balance)}</span></>}

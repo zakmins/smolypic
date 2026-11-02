@@ -17,6 +17,27 @@ On first launch the app **auto-seeds** a synthetic database (38 members, months 
 
 To package a distributable: `npm run dist` (electron-builder). If the native module ever needs re-fetching for Electron's ABI, run `npm run rebuild:sqlite`.
 
+### Normalize subscription date formats
+
+If a migrated database contains subscription dates with a time suffix, run the
+normalizer from the project root. It defaults to `sm/smolympic.db`; pass
+`--db <path>` to select another database. Use `--dry-run` to preview the number
+of dates that would change. A timestamped SQLite backup is created before any
+changes are made.
+
+```bash
+npm run db:normalize-dates -- --dry-run
+npm run db:normalize-dates
+```
+
+To repair a member whose dates are both `NaN-NaN-NaN`, specify their member ID
+and intended start date. The end date is calculated using that member's stored
+`duration_days`; the command also normalizes any timestamp-formatted dates.
+
+```bash
+npm run db:normalize-dates -- --repair-member 41 --start-date 2026-10-18
+```
+
 > Note: `npm run dev` (a plain browser tab) won't work on its own — the data layer lives in the Electron main process, so the app must run under Electron (`npm run electron:dev`).
 
 **Sign in.** The app opens on a login screen. Seeded accounts:

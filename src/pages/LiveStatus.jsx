@@ -20,6 +20,8 @@ export default function LiveStatus() {
   const [confirmExit, setConfirmExit] = useState(null);   // member pending manual "mark as exited"
   const [collecting, setCollecting] = useState(null);   // owed-row entry pending session collection
   const [voidingGuest, setVoidingGuest] = useState(null);   // guest row pending a voided walk-in charge
+  const [insideSelection, setInsideSelection] = useState([]);
+  const [confirmBulkClear, setConfirmBulkClear] = useState(null); // rows
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(t);
@@ -76,8 +78,45 @@ export default function LiveStatus() {
     return () => window.removeEventListener('keydown', onKey);
   }, [modal]);
 
+  useEffect(() => {
+    if (modal !== 'inside') setInsideSelection([]);
+  }, [modal]);
+
+  const getInsideRowKey = (row) => (row.guest ? `guest-${row.guestId}` : `member-${row.member.id}`);
+
+  const toggleInsideRow = (row, event) => {
+    if (event) event.stopPropagation();
+    const key = getInsideRowKey(row);
+    setInsideSelection((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  };
+
+  const selectedInsideRows = insideRows.filter((row) => insideSelection.includes(getInsideRowKey(row)));
+  const insideAllSelected = insideRows.length > 0 && insideSelection.length === insideRows.length;
+
+  const clearInsideRows = async (rows) => {
+    for (const row of rows) {
+      if (row.guest) {
+        await removeGuestSession(row.guestId);
+      } else {
+        await forceExitMember(row.member.id, row.member.name);
+      }
+    }
+    setInsideSelection([]);
+    setConfirmBulkClear(null);
+  };
+
+  const selectionCheckboxStyle = {
+    width: 18,
+    height: 18,
+    marginRight: 12,
+    flexShrink: 0,
+    cursor: 'pointer',
+    accentColor: 'var(--green)',
+    transform: 'translateY(-1px)',
+  };
+
   // ── row renderers (reuse .live-row / .exit-row) ──
-  const memberRow = (row) => {
+  const memberRow = (row, selected = false, onToggle = null) => {
     const { member, entryTime } = row;
     const status = memberStatus(member);
     const expired = status === 'expired';
@@ -87,6 +126,10 @@ export default function LiveStatus() {
     return (
       <div key={`m-${member.id}`} className={`live-row ${expired ? 'expired' : ''}`}
         onClick={() => goToMember(member.id)} role="button" title={t("Open {name}'s profile", { name: member.name })}>
+        <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <input type="checkbox" checked={selected} onClick={(e) => e.stopPropagation()} onChange={(e) => onToggle?.(e)}
+            aria-label={t('Select {name}', { name: member.name })} style={selectionCheckboxStyle} />
+        </div>
         <Avatar member={member} />
         <div style={{ minWidth: 0 }}>
           <div className="live-name">
@@ -122,10 +165,14 @@ export default function LiveStatus() {
     );
   };
 
-  const guestRow = (row) => {
+  const guestRow = (row, selected = false, onToggle = null) => {
     const minsLeft = Math.max(0, Math.ceil((row.expiresAt - now) / 60000));
     return (
       <div key={`g-${row.guestId}`} className="live-row guest">
+        <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <input type="checkbox" checked={selected} onClick={(e) => e.stopPropagation()} onChange={(e) => onToggle?.(e)}
+            aria-label={t('Select {name}', { name: row.name })} style={selectionCheckboxStyle} />
+        </div>
         <div className="avatar" style={{ background: 'var(--amber)' }} aria-hidden="true">{initials(row.name)}</div>
         <div style={{ minWidth: 0 }}>
           <div className="live-name">{row.name}</div>
@@ -308,9 +355,12 @@ export default function LiveStatus() {
 
   const renderBody = () => {
     if (modal === 'inside') {
-      return insideRows.length === 0
-        ? <div className="empty-state">{t('Nobody on the floor. The next swipe lands here.')}</div>
-        : insideRows.map((row) => (row.guest ? guestRow(row) : memberRow(row)));
+      if (insideRows.length === 0) return <div className="empty-state">{t('Nobody on the floor. The next swipe lands here.')}</div>;
+      return insideRows.map((row) => {
+        const key = getInsideRowKey(row);
+        const selected = insideSelection.includes(key);
+        return row.guest ? guestRow(row, selected, (event) => toggleInsideRow(row, event)) : memberRow(row, selected, (event) => toggleInsideRow(row, event));
+      });
     }
     if (modal === 'exits') {
       return recentExits.length === 0
@@ -385,9 +435,36 @@ export default function LiveStatus() {
             <div className="modal-head">
               <div className="modal-title">{titles[modal]}</div>
               <span className="panel-sub" style={{ marginLeft: 12 }}>{t('{n} total', { n: counts[modal] })}</span>
+              {modal === 'inside' && insideRows.length > 0 && (
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button type="button" className="btn ghost sm" onClick={() => setInsideSelection(insideAllSelected ? [] : insideRows.map(getInsideRowKey))}>
+                    {insideAllSelected ? t('Clear selection') : t('Select all')}
+                  </button>
+                  <button type="button" className="btn danger sm" disabled={selectedInsideRows.length === 0} onClick={() => setConfirmBulkClear(selectedInsideRows)}>
+                    {t('Remove selected')}
+                  </button>
+                </div>
+              )}
               <button className="x-btn" onClick={() => setModal(null)} aria-label={t('Close')}>×</button>
             </div>
             <div className="modal-body kpi-list" style={{ padding: 0 }}>{renderBody()}</div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
+      {confirmBulkClear && (
+        <Portal>
+        <div className="modal-center" onClick={() => setConfirmBulkClear(null)}>
+          <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('Confirm removal')}>
+            <div className="modal-head"><div className="modal-title">{t('Remove selected')}</div></div>
+            <div className="modal-body">
+              {t('This removes the {n} selected people from the floor. This action cannot be undone.', { n: confirmBulkClear.length })}
+            </div>
+            <div className="modal-foot">
+              <button className="btn ghost" onClick={() => setConfirmBulkClear(null)}>{t('Cancel')}</button>
+              <button className="btn danger" onClick={() => clearInsideRows(confirmBulkClear)}>{t('Remove selected')}</button>
+            </div>
           </div>
         </div>
         </Portal>

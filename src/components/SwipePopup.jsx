@@ -1,6 +1,6 @@
 import React from 'react';
 import { Avatar, SportBadge, Icons } from './atoms.jsx';
-import { daysRemaining, memberStatus, fmtDate, fmtTime, durationLabel, isUnlimitedSub, isGoldMember } from '../utils.js';
+import { daysRemaining, memberStatus, fmtDate, subEndDisplay, fmtTime, durationLabel, isUnlimitedSub, isGoldMember } from '../utils.js';
 import { useT } from '../i18n.jsx';
 
 /* The card stays on screen until the operator dismisses it (click ×, the
@@ -70,7 +70,7 @@ export default function SwipePopup({ event, queued, onDismiss, onViewMember }) {
               </div>
               <div>
                 <span className="k">{t('Subscription ends')}</span>
-                <span className="v mono" style={{ color: expired ? 'var(--red)' : 'var(--text)' }}>{fmtDate(member.subEnd)}</span>
+                <span className="v mono" style={{ color: expired ? 'var(--red)' : 'var(--text)' }}>{fmtDate(subEndDisplay(member))}</span>
               </div>
               <div>
                 <span className="k">{t('Days remaining')}</span>
