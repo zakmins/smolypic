@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS members (
   name TEXT NOT NULL,
   gender TEXT NOT NULL,
   dob TEXT,
+  parental_authorization_date TEXT,
   phone TEXT,
   blood_type TEXT,
   sports TEXT NOT NULL,             -- JSON array
@@ -384,6 +385,7 @@ function openDb(dbPath) {
   // Outstanding membership balance — added for partial payments. Older databases
   // predate the column; default 0 means "fully paid" for every existing member.
   ensureColumn(db, 'members', 'balance', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'members', 'parental_authorization_date', 'TEXT');
   // Blood type — free-text on older DBs predating this field (NULL ⇒ unknown).
   ensureColumn(db, 'members', 'blood_type', 'TEXT');
   // Sell-by-weight supplements: items tracked in grams and sold as scoops. Older
@@ -467,6 +469,7 @@ function memberRowToDict(db, r) {
     name: r.name,
     gender: r.gender,
     dob: r.dob,
+    parentalAuthorizationDate: r.parental_authorization_date,
     phone: r.phone,
     bloodType: r.blood_type,
     sports: JSON.parse(r.sports),

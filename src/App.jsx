@@ -121,7 +121,11 @@ function Dashboard() {
 
   // ── Swipe popup queue: stays until the operator dismisses it ──
   const [popupQueue, setPopupQueue] = useState([]);
-  const dismissPopup = useCallback(() => setPopupQueue((q) => q.slice(1)), []);
+  const pendingAuthorizationUids = useRef(new Set());
+  const dismissPopup = useCallback((event) => {
+    if (event?.kind === 'authorization_warning') pendingAuthorizationUids.current.delete(event.rfidUid);
+    setPopupQueue((q) => q.slice(1));
+  }, []);
 
   // Callers pass an English key (+ optional {placeholder} vars); the toast is
   // shown in the active language.
@@ -178,12 +182,14 @@ function Dashboard() {
   }, []);
 
   // ── RFID swipe: the backend owns the IN/OUT logic and all edge cases ──
-  const handleSwipe = useCallback(async (rfidUid) => {
+  const handleSwipe = useCallback(async (rfidUid, parentalAuthorizationAcknowledged = false) => {
+    if (!parentalAuthorizationAcknowledged && pendingAuthorizationUids.current.has(rfidUid)) return;
     try {
-      const d = await api('/swipe', { method: 'POST', body: { rfidUid } });
+      const d = await api('/swipe', { method: 'POST', body: { rfidUid, parentalAuthorizationAcknowledged } });
       setMembers(d.members); setPresence(d.presence); setExits(d.exits); setToday(d.today);
+      if (d.event.kind === 'authorization_warning') pendingAuthorizationUids.current.add(rfidUid);
       setPopupQueue((q) => [...q, d.event]);
-      if (ttsEnabled && window.smolympic?.speak) {
+      if (d.event.kind !== 'authorization_warning' && ttsEnabled && window.smolympic?.speak) {
         const text = buildSpeech(d.event);
         if (text) enqueueTts(window.smolympic.speak(text, ttsVoice));
       }
@@ -238,9 +244,32 @@ function Dashboard() {
     try {
       const d = await api(`/members/${memberId}/check-in`, { method: 'POST' });
       setMembers(d.members); setPresence(d.presence); setExits(d.exits); setToday(d.today);
-      showToast('Checked in — {name}', { name });
+      if (d.parentalAuthorizationWarning?.status === 'missing') {
+        showToast('No parental authorization on file — {name} is under 18', { name });
+      } else if (d.parentalAuthorizationWarning?.status === 'expired') {
+        showToast('Parental authorization expired — {name}', { name });
+      } else if (d.parentalAuthorizationWarning?.status === 'expiring') {
+        showToast('Parental authorization expires soon — {name}', { name });
+      } else {
+        showToast('Checked in — {name}', { name });
+      }
     } catch (e) {
       showToast('Could not check in: {msg}', { msg: e.message });
+    }
+  }, [showToast]);
+
+  const saveParentalAuthorization = useCallback(async (memberId, authorizationDate) => {
+    try {
+      const saved = await api(`/members/${memberId}/parental-authorization`, {
+        method: 'POST',
+        body: { authorizationDate },
+      });
+      setMembers((ms) => ms.map((m) => (m.id === saved.id ? saved : m)));
+      showToast('Parental authorization recorded — {name}', { name: saved.name });
+      return saved;
+    } catch (e) {
+      showToast('Could not save parental authorization: {msg}', { msg: e.message });
+      return null;
     }
   }, [showToast]);
 
@@ -511,11 +540,11 @@ function Dashboard() {
   const ctx = useMemo(() => ({
     members, presence, exits, today, stock, stockLog, consumed, pricing,
     saveMember, renewMember, payInsurance, payBalance, collectSessions, voidPayment, deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing,
-    savePreferences, simulateSwipe, handleSwipe, addGuestSession, removeGuestSession, forceExitMember, checkInMember, showToast,
+    savePreferences, simulateSwipe, handleSwipe, addGuestSession, removeGuestSession, forceExitMember, checkInMember, saveParentalAuthorization, showToast,
     daysRemaining, memberStatus, setRoute, focusMemberId, setFocusMemberId, openNewMember, setOpenNewMember,
   }), [members, presence, exits, today, stock, stockLog, consumed, pricing, saveMember, renewMember, payInsurance, payBalance, collectSessions,
        voidPayment, deleteMember, saveStockItem, stockOperation, deleteStockItem, clearStockLog, savePricing, savePreferences, simulateSwipe, handleSwipe,
-       addGuestSession, removeGuestSession, forceExitMember, checkInMember, showToast, focusMemberId, openNewMember]);
+       addGuestSession, removeGuestSession, forceExitMember, checkInMember, saveParentalAuthorization, showToast, focusMemberId, openNewMember]);
 
   const pages = {
     live: LiveStatus, customers: Customers, judo: Judo, wrestling: Wrestling,
@@ -557,8 +586,9 @@ function Dashboard() {
         </div>
       </div>
       {popupQueue.length > 0 && (
-        <SwipePopup event={popupQueue[0]} queued={popupQueue.length - 1} onDismiss={dismissPopup}
-          onViewMember={(id) => { setFocusMemberId(id); setRoute('customers'); dismissPopup(); }} />
+        <SwipePopup event={popupQueue[0]} queued={popupQueue.length - 1} onDismiss={() => dismissPopup(popupQueue[0])}
+          onContinueAuthorization={() => handleSwipe(popupQueue[0].rfidUid, true).then(() => dismissPopup(popupQueue[0]))}
+          onViewMember={(id) => { setFocusMemberId(id); setRoute('customers'); dismissPopup(popupQueue[0]); }} />
       )}
       {toast && <div className="toast" role="status">{toast}</div>}
       <button type="button" className={`icon-btn tts-toggle-btn ${ttsEnabled ? '' : 'muted'} ${ttsAnim || ''}`.trim()} onClick={toggleTts}

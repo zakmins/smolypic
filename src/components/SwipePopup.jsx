@@ -5,7 +5,7 @@ import { useT } from '../i18n.jsx';
 
 /* The card stays on screen until the operator dismisses it (click ×, the
    overlay, or press Esc). Back-to-back swipes queue behind it. */
-export default function SwipePopup({ event, queued, onDismiss, onViewMember }) {
+export default function SwipePopup({ event, queued, onDismiss, onViewMember, onContinueAuthorization }) {
   const t = useT();
   const { kind, member } = event;
 
@@ -34,6 +34,41 @@ export default function SwipePopup({ event, queued, onDismiss, onViewMember }) {
                 <div><span className="k">{t('Action')}</span><span className="v">{t('Not registered — check with reception')}</span></div>
               </div>
             </div>
+          </div>
+          {queued > 0 && <div className="swipe-queue-hint">{t('+{queued} waiting', { queued })}</div>}
+        </div>
+      </div>
+    );
+  }
+
+  if (kind === 'authorization_warning') {
+    const warning = event.parentalAuthorizationWarning;
+    const message = warning.status === 'missing'
+      ? t('No parental authorization on file — {name} is under 18', { name: member.name })
+      : warning.status === 'expired'
+        ? t('Parental authorization expired on {date}', { date: fmtDate(warning.expiryDate) })
+        : t('Parental authorization expires soon on {date}', { date: fmtDate(warning.expiryDate) });
+    return (
+      <div className="popup-layer" onClick={onDismiss}>
+        <div className="swipe-card" onClick={(e) => e.stopPropagation()} role="alertdialog" aria-label={t('Parental authorization warning')}>
+          <div className="swipe-band unknown" />
+          <div className="swipe-head">
+            <span className="badge amber">{t('Authorization warning')}</span>
+            <span className="swipe-time mono">{fmtTime(event.at)}</span>
+            <button className="x-btn" onClick={onDismiss} aria-label={t('Dismiss')}>×</button>
+          </div>
+          <div className="swipe-body">
+            <Avatar member={member} size="lg" />
+            <div style={{ minWidth: 0 }}>
+              <div className="swipe-name">{member.name}</div>
+              <div className="swipe-warning amber" style={{ margin: '12px 0 0' }}>
+                <Icons.warn width="18" height="18" /> {message}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '0 28px 18px' }}>
+            <button type="button" className="btn ghost" onClick={onDismiss}>{t('Cancel check-in')}</button>
+            <button type="button" className="btn primary" onClick={onContinueAuthorization}>{t('Continue check-in')}</button>
           </div>
           {queued > 0 && <div className="swipe-queue-hint">{t('+{queued} waiting', { queued })}</div>}
         </div>

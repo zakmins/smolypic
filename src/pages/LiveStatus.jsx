@@ -2,17 +2,27 @@ import React, { useContext, useEffect, useState } from 'react';
 import { AppCtx } from '../App.jsx';
 import { api } from '../api.js';
 import { Avatar, SportBadge, MembershipBadge, Icons } from '../components/atoms.jsx';
-import { hhmmss, fmtTime, fmtDate, durationLabel, daysRemaining, memberStatus, usesSessionQuota, isSessionsOwed, expiringReason, initials, dzd, isGoldMember } from '../utils.js';
+import Select from '../components/Select.jsx';
+import { hhmmss, fmtTime, fmtDate, durationLabel, daysRemaining, memberStatus, usesSessionQuota, isSessionsOwed, expiringReason, initials, dzd, isGoldMember,
+  isMinor, parentalAuthorizationExpiry, parentalAuthorizationStatus } from '../utils.js';
 import { useT } from '../i18n.jsx';
 import Portal from '../components/Portal.jsx';
 
 const TWO_HOURS = 2 * 3600 * 1000;
+const AUTHORIZATION_LABEL = {
+  valid: 'Authorization valid',
+  missing: 'Authorization missing',
+  expiring: 'Authorization expiring soon',
+  expired: 'Authorization expired',
+};
 
 export default function LiveStatus() {
   const { members, presence, exits, today, setRoute, setFocusMemberId, removeGuestSession, voidPayment, forceExitMember, collectSessions } = useContext(AppCtx);
   const t = useT();
   const [, tick] = useState(0);
   const [modal, setModal] = useState(null);   // 'inside' | 'exits' | 'subscribed' | 'entries' | 'owed' | 'expiring' | 'balances' | null
+  const [authorizationQuery, setAuthorizationQuery] = useState('');
+  const [authorizationFilter, setAuthorizationFilter] = useState('all');
   const [subscribed, setSubscribed] = useState(null);   // fetched on open
   const [entriesToday, setEntriesToday] = useState(null);
   const [owedList, setOwedList] = useState(null);
@@ -50,6 +60,18 @@ export default function LiveStatus() {
   // total still to collect across the club.
   const balanceRows = members.filter((m) => m.balance > 0).sort((a, b) => b.balance - a.balance);
   const balanceTotal = balanceRows.reduce((s, m) => s + m.balance, 0);
+  const authorizationPriority = { missing: 0, expired: 1, expiring: 2, valid: 3 };
+  const authorizationRows = members.filter((m) => isMinor(m.dob)).sort((a, b) =>
+    authorizationPriority[parentalAuthorizationStatus(a)] - authorizationPriority[parentalAuthorizationStatus(b)]
+    || a.name.localeCompare(b.name));
+  const authorizationValidCount = authorizationRows.filter((m) => parentalAuthorizationStatus(m) === 'valid').length;
+  const authorizationAttentionCount = authorizationRows.length - authorizationValidCount;
+  const authorizationFilteredRows = authorizationRows.filter((m) => {
+    const status = parentalAuthorizationStatus(m);
+    const query = authorizationQuery.trim().toLowerCase();
+    return (authorizationFilter === 'all' || status === authorizationFilter)
+      && (!query || [m.name, m.phone, m.rfidUid].some((value) => String(value || '').toLowerCase().includes(query)));
+  });
 
   // Lists for the fetched modals load lazily when their card is opened.
   useEffect(() => {
@@ -339,6 +361,28 @@ export default function LiveStatus() {
     </div>
   );
 
+  const authorizationRow = (m) => {
+    const status = parentalAuthorizationStatus(m);
+    const expiry = m.parentalAuthorizationDate ? parentalAuthorizationExpiry(m.parentalAuthorizationDate) : null;
+    return (
+      <div key={`a-${m.id}`} className="authorization-row" onClick={() => goToMember(m.id)}
+        role="button" title={t("Open {name}'s profile", { name: m.name })}>
+        <Avatar member={m} />
+        <div className="authorization-details">
+          <div className="live-name">{m.name}</div>
+          <div className="authorization-date">
+            {m.parentalAuthorizationDate
+              ? t('Received {date} · expires {expiry}', { date: fmtDate(m.parentalAuthorizationDate), expiry: fmtDate(expiry) })
+              : t('No authorization recorded')}
+          </div>
+        </div>
+        <span className={`badge authorization-status ${status === 'valid' ? 'green' : status === 'expiring' ? 'amber' : 'red'}`}>
+          {t(AUTHORIZATION_LABEL[status])}
+        </span>
+      </div>
+    );
+  };
+
   const card = (key, label, count, sub, color) => (
     <div className="stat-card clickable" role="button" tabIndex={0}
       onClick={() => setModal(key)}
@@ -350,8 +394,8 @@ export default function LiveStatus() {
     </div>
   );
 
-  const titles = { inside: t('Currently inside'), exits: t('Recent exits'), subscribed: t('Subscribed today'), entries: t('Entries today'), owed: t('Sessions owed'), expiring: t('Expiring soon'), balances: t('Outstanding balances') };
-  const counts = { inside: insideRows.length, exits: recentExits.length, subscribed: today.subscriptionCount, entries: today.entries, owed: owedCount, expiring: expiringCount, balances: balanceRows.length };
+  const titles = { inside: t('Currently inside'), exits: t('Recent exits'), subscribed: t('Subscribed today'), entries: t('Entries today'), owed: t('Sessions owed'), expiring: t('Expiring soon'), balances: t('Outstanding balances'), authorizations: t('Parental authorizations') };
+  const counts = { inside: insideRows.length, exits: recentExits.length, subscribed: today.subscriptionCount, entries: today.entries, owed: owedCount, expiring: expiringCount, balances: balanceRows.length, authorizations: authorizationRows.length };
 
   const renderBody = () => {
     if (modal === 'inside') {
@@ -406,6 +450,37 @@ export default function LiveStatus() {
         ? <div className="empty-state">{t('No outstanding balances — every membership is paid up.')}</div>
         : balanceRows.map(balanceRow);
     }
+    if (modal === 'authorizations') {
+      return authorizationRows.length === 0
+        ? <div className="empty-state">{t('No members under 18 are registered.')}</div>
+        : (
+          <>
+            <div className="authorization-toolbar">
+              <input type="search" value={authorizationQuery} onChange={(e) => setAuthorizationQuery(e.target.value)}
+                data-rfid-capture placeholder={t('Search minors by name, phone or scan RFID tag…')} aria-label={t('Search parental authorizations')} />
+              <Select value={authorizationFilter} onChange={setAuthorizationFilter} ariaLabel={t('Filter authorizations by status')}
+                options={[
+                  ['all', t('All authorization statuses')],
+                  ['missing', t('Authorization missing')],
+                  ['expired', t('Authorization expired')],
+                  ['expiring', t('Authorization expiring soon')],
+                  ['valid', t('Authorization valid')],
+                ]} />
+              {(authorizationQuery || authorizationFilter !== 'all') && (
+                <button type="button" className="btn ghost sm" onClick={() => { setAuthorizationQuery(''); setAuthorizationFilter('all'); }}>
+                  {t('Clear filters')}
+                </button>
+              )}
+              <span className="authorization-result-count">
+                {t('Showing {shown} of {total}', { shown: authorizationFilteredRows.length, total: authorizationRows.length })}
+              </span>
+            </div>
+            {authorizationFilteredRows.length === 0
+              ? <div className="empty-state">{t('No minors match this search or filter.')}</div>
+              : authorizationFilteredRows.map(authorizationRow)}
+          </>
+        );
+    }
     return null;
   };
 
@@ -426,6 +501,9 @@ export default function LiveStatus() {
         {card('expiring', t('Expiring soon'), expiringCount, t('lapsing on date or sessions'), expiringCount ? 'var(--red)' : undefined)}
         {card('owed', t('Sessions owed'), owedCount, t('club owes — collect payment'), owedCount ? 'var(--amber)' : undefined)}
         {card('balances', t('Outstanding balances'), balanceRows.length, balanceRows.length ? t('{amount} to collect', { amount: dzd(balanceTotal) }) : t('all memberships paid up'), balanceRows.length ? 'var(--red)' : undefined)}
+        {card('authorizations', t('Parental authorizations'), authorizationRows.length,
+          t('{n} need attention · {valid} valid', { n: authorizationAttentionCount, valid: authorizationValidCount }),
+          authorizationAttentionCount ? 'var(--amber)' : 'var(--green)')}
       </div>
 
       {modal && (

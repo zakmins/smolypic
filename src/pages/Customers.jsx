@@ -6,7 +6,8 @@ import DatePicker from '../components/DatePicker.jsx';
 import { SPORTS, dzd, fmtDate, subEndDisplay, age, daysRemaining, memberStatus, fmtTime, durationLabel,
   isSubscription, isUnlimitedSub, usesSessionQuota, remainingLabel, pageList,
   insuranceStatus, insuranceDaysLeft, INSURANCE_PRICE, isGoldMember,
-  subPlans, planDurationLabel, planUnit, planTerms, isExactWeekMatch } from '../utils.js';
+  subPlans, planDurationLabel, planUnit, planTerms, isExactWeekMatch,
+  isMinor, parentalAuthorizationExpiry, parentalAuthorizationStatus, dayKey } from '../utils.js';
 import { api } from '../api.js';
 import { useT } from '../i18n.jsx';
 import Portal from '../components/Portal.jsx';
@@ -26,10 +27,16 @@ const PAYMENT_PAGE_SIZE = 5;
 const PAYMENT_KIND_LABEL = { subscription: 'Subscription', session: 'Session', insurance: 'Insurance' };
 // Members table pager.
 const MEMBERS_PAGE_SIZE = 50;
+const AUTHORIZATION_LABEL = {
+  valid: 'Authorization valid',
+  missing: 'Authorization missing',
+  expiring: 'Authorization expiring soon',
+  expired: 'Authorization expired',
+};
 
 export default function Customers() {
   const t = useT();
-  const { members, presence, saveMember, renewMember, payInsurance, payBalance, deleteMember, checkInMember, focusMemberId, setFocusMemberId, openNewMember, setOpenNewMember } = useContext(AppCtx);
+  const { members, presence, saveMember, renewMember, payInsurance, payBalance, deleteMember, checkInMember, saveParentalAuthorization, focusMemberId, setFocusMemberId, openNewMember, setOpenNewMember } = useContext(AppCtx);
   const [q, setQ] = useState('');
   const [gender, setGender] = useState('all');
   const [sport, setSport] = useState('all');
@@ -174,6 +181,7 @@ export default function Customers() {
           onCollect={() => setCollecting(sel)}
           onPayInsurance={payInsurance}
           onCheckIn={checkInMember}
+          onSaveParentalAuthorization={saveParentalAuthorization}
           onDelete={() => setConfirmDelete(sel)} />
       )}
       {editing && (
@@ -209,7 +217,7 @@ export default function Customers() {
   );
 }
 
-function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect, onPayInsurance, onCheckIn, onDelete }) {
+function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect, onPayInsurance, onCheckIn, onSaveParentalAuthorization, onDelete }) {
   const t = useT();
   const { pricing, voidPayment } = useContext(AppCtx);
   const insurancePrice = pricing?.insurance ?? INSURANCE_PRICE;
@@ -221,7 +229,11 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
     : Math.max(0, Math.min(100, (days / m.durationDays) * 100));
   const barClass = isGoldMember(m) ? 'gold' : pct <= 15 ? 'low' : pct <= 40 ? 'mid' : '';
   const insideNow = presence.some((p) => p.memberId === m.id);
+  const authorizationStatus = parentalAuthorizationStatus(m);
   const [confirmCheckIn, setConfirmCheckIn] = useState(false);
+  const [editingAuthorization, setEditingAuthorization] = useState(false);
+  const [authorizationDate, setAuthorizationDate] = useState(dayKey(Date.now()));
+  const [savingAuthorization, setSavingAuthorization] = useState(false);
 
   const [visits, setVisits] = useState(null);
   const [page, setPage] = useState(1);
@@ -331,6 +343,56 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
             )}
           </div>
 
+          {isMinor(m.dob) && (
+            <div className="ins-card" style={{ alignItems: 'flex-start' }}>
+              <Icons.shield width="20" height="20" style={{
+                color: authorizationStatus === 'valid' ? 'var(--green)' : authorizationStatus === 'expiring' ? 'var(--amber)' : 'var(--red)',
+                flexShrink: 0,
+              }} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="ins-title">{t('Parental authorization')}</div>
+                <div className="ins-sub">
+                  {authorizationStatus === 'missing'
+                    ? t('No authorization recorded')
+                    : t('Received {date} · expires {expiry}', {
+                      date: fmtDate(m.parentalAuthorizationDate),
+                      expiry: fmtDate(parentalAuthorizationExpiry(m.parentalAuthorizationDate)),
+                    })}
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <span className={`badge ${authorizationStatus === 'valid' ? 'green' : authorizationStatus === 'expiring' ? 'amber' : 'red'}`}>
+                    {t(AUTHORIZATION_LABEL[authorizationStatus])}
+                  </span>
+                </div>
+                {editingAuthorization && (
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                    <div className="field" style={{ width: 180 }}>
+                      <label>{t('Date received')}</label>
+                      <DatePicker value={authorizationDate} onChange={setAuthorizationDate}
+                        ariaLabel={t('Authorization received date')} placeholder="Date received" />
+                    </div>
+                    <button className="btn sm primary" disabled={savingAuthorization || !authorizationDate}
+                      onClick={async () => {
+                        setSavingAuthorization(true);
+                        const saved = await onSaveParentalAuthorization(m.id, authorizationDate);
+                        setSavingAuthorization(false);
+                        if (saved) setEditingAuthorization(false);
+                      }}>{savingAuthorization ? t('Saving…') : t('Save authorization')}</button>
+                    <button className="btn sm ghost" disabled={savingAuthorization}
+                      onClick={() => setEditingAuthorization(false)}>{t('Cancel')}</button>
+                  </div>
+                )}
+              </div>
+              {!editingAuthorization && (
+                <button className="btn sm" style={{ marginLeft: 'auto', flexShrink: 0 }}
+                  onClick={() => {
+                    setAuthorizationDate(dayKey(Date.now()));
+                    setEditingAuthorization(true);
+                  }}>{m.parentalAuthorizationDate ? t('Renew authorization') : t('Record authorization')}</button>
+              )}
+            </div>
+          )}
+
           {/* Outstanding balance — shown only when the member owes money */}
           {m.balance > 0 && (
             <div className="ins-card" style={{ marginTop: 12 }}>
@@ -354,10 +416,11 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
             <>
               {visits.slice((page - 1) * ENTRY_PAGE_SIZE, page * ENTRY_PAGE_SIZE).map((v, i) => (
                 <div key={(page - 1) * ENTRY_PAGE_SIZE + i} className="leader-row">
-                  <span className="mono" style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>
-                    {fmtDate(v.exitTime)} · {t('in')} {fmtTime(v.entryTime)}
+                  <span className="mono" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>
+                    <span>{t('In')} · {fmtDate(v.entryTime)} · {fmtTime(v.entryTime)}</span>
+                    <span>{t('Out')} · {fmtDate(v.exitTime)} · {fmtTime(v.exitTime)}</span>
                   </span>
-                  <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 12 }}>{durationLabel(v.exitTime - v.entryTime)}</span>
+                  <span style={{ marginLeft: 'auto', flexShrink: 0, fontFamily: 'var(--mono)', fontSize: 12 }}>{durationLabel(v.exitTime - v.entryTime)}</span>
                 </div>
               ))}
               {totalPages > 1 && (
@@ -443,6 +506,15 @@ function MemberDrawer({ member: m, presence, onClose, onEdit, onRenew, onCollect
           <div className="modal-head"><div className="modal-title">{t('Check in member')}</div></div>
           <div className="modal-body">
             {t('Check in ')}<strong>{m.name}</strong>{t('? This puts them on the floor immediately, exactly as if they had swiped their tag at the entrance.')}
+            {authorizationStatus !== 'valid' && authorizationStatus !== 'not-required' && (
+              <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--amber)', fontWeight: 700 }}>
+                {authorizationStatus === 'missing'
+                  ? t('No parental authorization on file — {name} is under 18', { name: m.name })
+                  : authorizationStatus === 'expired'
+                    ? t('Parental authorization expired — {name}', { name: m.name })
+                    : t('Parental authorization expires soon — {name}', { name: m.name })}
+              </div>
+            )}
             {usesSessions && (
               <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--amber)', fontWeight: 600 }}>
                 {t('This will deduct one session from their remaining balance ({left} left).', { left: m.sessionsLeft })}

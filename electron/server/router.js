@@ -41,6 +41,45 @@ const subDaysLeft = (m) => Math.ceil((ms(m.subEnd) - Date.now()) / 86400000);
 // camelCase dict shape — for swipe/check-in, which never go through memberRowToDict.
 const rowDaysLeft = (m, now) => Math.ceil((ms(m.sub_end) - now.getTime()) / 86400000);
 
+function isMinorDob(dob, now) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dob || ''))) return false;
+  const [year, month, day] = dob.split('-').map(Number);
+  const birth = new Date(year, month - 1, day);
+  if (birth.getFullYear() !== year || birth.getMonth() !== month - 1 || birth.getDate() !== day) return false;
+  let age = now.getFullYear() - year;
+  if (now.getMonth() < month - 1 || (now.getMonth() === month - 1 && now.getDate() < day)) age -= 1;
+  return age >= 0 && age < 18;
+}
+
+function authorizationExpiry(date) {
+  const [year, month, day] = date.split('-').map(Number);
+  const nextYear = year + 1;
+  const endOfMonth = new Date(nextYear, month, 0).getDate();
+  return `${nextYear}-${pad(month)}-${pad(Math.min(day, endOfMonth))}`;
+}
+
+function parentalAuthorizationStatus(member, now) {
+  if (!isMinorDob(member.dob, now)) return 'not-required';
+  if (!member.parental_authorization_date) return 'missing';
+  const expiry = authorizationExpiry(member.parental_authorization_date);
+  const today = isoDate(now);
+  if (expiry < today) return 'expired';
+  const [expiryYear, expiryMonth, expiryDay] = expiry.split('-').map(Number);
+  const [todayYear, todayMonth, todayDay] = today.split('-').map(Number);
+  const daysLeft = (Date.UTC(expiryYear, expiryMonth - 1, expiryDay)
+    - Date.UTC(todayYear, todayMonth - 1, todayDay)) / 86400000;
+  return daysLeft <= 30 ? 'expiring' : 'valid';
+}
+
+function parentalAuthorizationWarning(member, now) {
+  const status = parentalAuthorizationStatus(member, now);
+  if (status === 'not-required' || status === 'valid') return null;
+  return {
+    status,
+    expiryDate: member.parental_authorization_date ? authorizationExpiry(member.parental_authorization_date) : null,
+  };
+}
+
 // Negative quota ⇒ the club is carrying the member. Unlimited subs (NULL quota) never qualify.
 const isOwed = (m) => m.sessionsLeft != null && m.sessionsLeft < 0;
 
@@ -157,6 +196,7 @@ function allMembers(db) {
       name: r.name,
       gender: r.gender,
       dob: r.dob,
+      parentalAuthorizationDate: r.parental_authorization_date,
       phone: r.phone,
       bloodType: r.blood_type,
       sports: JSON.parse(r.sports),
@@ -391,6 +431,23 @@ function swipe(db, { body }) {
       db.prepare('UPDATE entries SET exit_time=? WHERE id=?').run(iso(now), open.id);
       event = { kind: 'out', entryTime: ms(open.entry_time), at: now.getTime() };
     } else {
+      const authorizationWarning = parentalAuthorizationWarning(m, now);
+      if (authorizationWarning && body.parentalAuthorizationAcknowledged !== true) {
+        event = {
+          kind: 'authorization_warning',
+          rfidUid: m.rfid_uid,
+          at: now.getTime(),
+          member: memberRowToDict(db, m),
+          parentalAuthorizationWarning: authorizationWarning,
+        };
+        return {
+          event,
+          members: allMembers(db),
+          presence: presenceList(db),
+          exits: exitsList(db),
+          today: todayStats(db),
+        };
+      }
       db.prepare('INSERT INTO entries (member_id,entry_time,exit_time) VALUES (?,?,NULL)').run(m.id, iso(now));
       if (m.membership_type === 'subscription') {
         const dead = rowDaysLeft(m, now) <= 0;   // sub_end already passed — the plan is dead
@@ -461,11 +518,13 @@ function checkIn(db, { params, user }) {
     }
   }
   logActivity(db, user.id, 'member.check_in', m.name, `Manually checked in ${m.name}`);
+  const authorizationWarning = parentalAuthorizationWarning(m, now);
   return {
     members: allMembers(db),
     presence: presenceList(db),
     exits: exitsList(db),
     today: todayStats(db),
+    parentalAuthorizationWarning: authorizationWarning,
   };
 }
 
@@ -613,6 +672,24 @@ function updateMember(db, { params, body, user }) {
   return memberRowToDict(db, getMember(db, id));
 }
 
+function recordParentalAuthorization(db, { params, body, user }) {
+  const id = Number(params[0]);
+  const member = getMember(db, id);
+  if (!isMinorDob(member.dob, new Date())) throw new HttpError(400, 'Parental authorization is only required for members under 18');
+  const date = String(body.authorizationDate || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpError(400, 'Enter a valid authorization date');
+  const [year, month, day] = date.split('-').map(Number);
+  const parsed = new Date(year, month - 1, day);
+  if (parsed.getFullYear() !== year || parsed.getMonth() !== month - 1 || parsed.getDate() !== day) {
+    throw new HttpError(400, 'Enter a valid authorization date');
+  }
+  if (date > isoDate(new Date())) throw new HttpError(400, 'Authorization date cannot be in the future');
+  db.prepare('UPDATE members SET parental_authorization_date=? WHERE id=?').run(date, id);
+  logActivity(db, user.id, 'member.parental_authorization', member.name,
+    `Recorded parental authorization for ${member.name} — received ${date}, expires ${authorizationExpiry(date)}`);
+  return memberRowToDict(db, getMember(db, id));
+}
+
 // Pay the yearly 500 DZD insurance — enrols if needed, or renews once it has
 // expired. You cannot pre-pay while it's still active (no stacking years).
 function payInsurance(db, { params, user }) {
@@ -667,7 +744,8 @@ function renewMember(db, { params, body, user }) {
     }
   }
   if (body.days) {
-    const base = Math.max(now.getTime(), ms(m.sub_end));
+    const exhaustedSessions = m.sessions_total != null && m.sessions_left <= 0;
+    const base = exhaustedSessions ? now.getTime() : Math.max(now.getTime(), ms(m.sub_end));
     // sub_start moves to the same anchor: it should read as "start of the
     // current paid period," not freeze at the member's very first subscription.
     after.sub_start = isoDate(new Date(base));
@@ -1724,6 +1802,7 @@ const ROUTES = [
   { m: 'POST', re: /^\/members\/(\d+)\/pay-balance$/, auth: true, fn: payBalance },
   { m: 'POST', re: /^\/members\/(\d+)\/collect-sessions$/, auth: true, fn: collectSessions },
   { m: 'POST', re: /^\/members\/(\d+)\/insurance$/, auth: true, fn: payInsurance },
+  { m: 'POST', re: /^\/members\/(\d+)\/parental-authorization$/, auth: true, fn: recordParentalAuthorization },
   { m: 'GET', re: /^\/members\/(\d+)\/entries$/, fn: memberEntries },
   { m: 'GET', re: /^\/members\/(\d+)\/payments$/, auth: true, fn: memberPayments },
   { m: 'POST', re: /^\/payments\/(\d+)\/void$/, auth: true, fn: voidPayment },

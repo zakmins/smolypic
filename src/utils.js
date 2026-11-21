@@ -42,6 +42,37 @@ export const memberStatus = (m) => {
   return dateOk && sessionsOk ? 'active' : 'expired';
 };
 
+export const isMinor = (dob, now = new Date()) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dob || ''))) return false;
+  const [year, month, day] = dob.split('-').map(Number);
+  const birth = new Date(year, month - 1, day);
+  if (birth.getFullYear() !== year || birth.getMonth() !== month - 1 || birth.getDate() !== day) return false;
+  let years = now.getFullYear() - year;
+  if (now.getMonth() < month - 1 || (now.getMonth() === month - 1 && now.getDate() < day)) years -= 1;
+  return years >= 0 && years < 18;
+};
+
+export const parentalAuthorizationExpiry = (receivedDate) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(receivedDate || ''))) return null;
+  const [year, month, day] = receivedDate.split('-').map(Number);
+  const targetYear = year + 1;
+  const targetDay = Math.min(day, new Date(targetYear, month, 0).getDate());
+  return `${targetYear}-${String(month).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
+};
+
+export const parentalAuthorizationStatus = (m, now = new Date()) => {
+  if (!isMinor(m.dob, now)) return 'not-required';
+  if (!m.parentalAuthorizationDate) return 'missing';
+  const expiry = parentalAuthorizationExpiry(m.parentalAuthorizationDate);
+  if (!expiry) return 'missing';
+  const today = dayKey(now.getTime());
+  if (expiry < today) return 'expired';
+  const [y, mo, d] = expiry.split('-').map(Number);
+  const [ty, tmo, td] = today.split('-').map(Number);
+  const daysLeft = (Date.UTC(y, mo - 1, d) - Date.UTC(ty, tmo - 1, td)) / 86400000;
+  return daysLeft <= 30 ? 'expiring' : 'valid';
+};
+
 // The "remaining" figure shown in lists/rows: "Unlimited" for unlimited subs,
 // a session count for metered subs and pay-per-session members.
 export const remainingLabel = (m) =>
