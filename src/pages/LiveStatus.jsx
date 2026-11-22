@@ -525,7 +525,7 @@ export default function LiveStatus() {
               )}
               <button className="x-btn" onClick={() => setModal(null)} aria-label={t('Close')}>×</button>
             </div>
-            <div className="modal-body kpi-list" style={{ padding: 0 }}>{renderBody()}</div>
+            <div className={`modal-body kpi-list${modal === 'inside' ? ' floor-list' : ''}`} style={{ padding: 0 }}>{renderBody()}</div>
           </div>
         </div>
         </Portal>

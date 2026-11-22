@@ -842,6 +842,7 @@ input::placeholder { color: var(--faint); }
 .kpi-list { max-height: 62vh; overflow-y: auto; }
 .kpi-list .live-row, .kpi-list .exit-row { cursor: pointer; }
 .kpi-list .live-row.guest { cursor: default; }
+.kpi-list:not(.floor-list) .live-row { grid-template-columns: 38px minmax(0, 1fr) auto auto; }
 .authorization-row {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr) auto;
